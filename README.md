@@ -43,6 +43,12 @@ Names without a prefix target the dylint library; names prefixed with `clippy::`
 | [`lints/`](lints/) | The dylint cdylib (`oneway_lints`). Pinned to a specific nightly. |
 | [`cli/`](cli/) | The `cargo-oneway` binary, published to crates.io. |
 
+## Releases
+
+`cargo-oneway` ships on every push to `main`: the [release workflow](.github/workflows/release.yml) bumps the patch version, publishes to crates.io, and commits the bump back as `chore: release cargo-oneway vX.Y.Z`. No manual tagging required. Version inflation is the cost; reproducibility (pinned versions in users' `Cargo.lock`) is the benefit.
+
+The dylint library (`lints/`) is consumed via git (`cargo dylint --git ...`), so it doesn't have a release cadence — every push to `main` is immediately picked up by the next `cargo oneway` invocation that hits the dylint cache miss.
+
 ## License
 
 Dual-licensed under MIT or Apache-2.0.
