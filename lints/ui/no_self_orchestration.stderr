@@ -1,0 +1,16 @@
+error: public method `rebuild` calls public method `self.list()` — extract this composition to a dedicated use-case struct that depends on the type
+  --> $DIR/no_self_orchestration.rs:20:23
+   |
+LL |         let db = self.list();
+   |                       ^^^^
+   |
+   = note: `#[deny(no_self_orchestration)]` on by default
+
+error: public method `sync` calls public method `self.put()` — extract this composition to a dedicated use-case struct that depends on the type
+  --> $DIR/no_self_orchestration.rs:24:14
+   |
+LL |         self.put(item);
+   |              ^^^
+
+error: aborting due to 2 previous errors
+

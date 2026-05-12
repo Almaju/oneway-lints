@@ -36,6 +36,7 @@ Click any rule for its full rationale and bad/good examples.
 | [`no_if_else`](lints/docs/no_if_else.md) | warn | Prefer `match` over `if`/`else` chains. |
 | [`no_nested_functions`](lints/docs/no_nested_functions.md) | warn | No functions defined inside other functions. |
 | [`no_panic`](lints/docs/no_panic.md) | deny | No `panic!`/`todo!`/`unimplemented!`/`unreachable!` in non-test code. |
+| [`no_self_orchestration`](lints/docs/no_self_orchestration.md) | deny | A pub method must not call another pub method on `self` — extract workflows. |
 | [`no_unwrap`](lints/docs/no_unwrap.md) | deny | No `.unwrap()`/`.expect()` in non-test code. |
 | [`one_constructor_name`](lints/docs/one_constructor_name.md) | deny | Constructors must be named `new` (not `create`/`build`/`init`/…). |
 | [`one_public_type_per_file`](lints/docs/one_public_type_per_file.md) | warn | At most one primary public type per file. |

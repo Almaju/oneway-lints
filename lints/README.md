@@ -93,6 +93,12 @@ The "Tool" column on every rule below tells you which one fires. `cargo oneway` 
 |------|----------|------|-----------|
 | [`one_public_type_per_file`](docs/one_public_type_per_file.md) | warn | dylint | One primary pub type per file |
 
+## Architecture
+
+| Lint | Severity | Tool | One-liner |
+|------|----------|------|-----------|
+| [`no_self_orchestration`](docs/no_self_orchestration.md) | deny | dylint | A pub method must not call another pub method on `self` — extract workflows to use-case structs |
+
 ## Imports & Style
 
 | Lint | Severity | Tool | One-liner |

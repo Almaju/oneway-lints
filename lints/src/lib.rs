@@ -15,6 +15,7 @@ extern crate rustc_span;
 
 dylint_linting::dylint_library!();
 
+mod architecture;
 mod control_flow;
 mod functions;
 mod naming;
@@ -66,4 +67,7 @@ pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lin
 
     lint_store.register_lints(&[naming::TYPE_DERIVED_NAMING]);
     lint_store.register_early_pass(|| Box::new(naming::TypeDerivedNaming));
+
+    lint_store.register_lints(&[architecture::NO_SELF_ORCHESTRATION]);
+    lint_store.register_early_pass(|| Box::new(architecture::NoSelfOrchestration));
 }
