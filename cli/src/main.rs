@@ -269,7 +269,7 @@ FLAGS:
 
 CONFIG:
     oneway.toml at the project root can disable specific rules:
-        disable = [\"no_loop\", \"clippy::wildcard_imports\"]
+        disable = [\"type_derived_naming\", \"clippy::wildcard_imports\"]
 
 ENVIRONMENT:
     ONEWAY_LINTS_PATH   Path to a local `oneway-lints` checkout. When set,

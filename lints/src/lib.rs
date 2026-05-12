@@ -1,10 +1,11 @@
 #![feature(rustc_private)]
 #![allow(unused_extern_crates)]
 // WHY: rustc's clippy stage doesn't know about the dylint-defined lints
-// declared in this crate (no_loop, no_if_else, type_derived_naming, etc.),
-// so `#[allow(no_loop)]` on a state-machine function trips an `unknown_lints`
-// warning under clippy. The lint names ARE valid under the dylint stage
-// where they're registered. Silence the cross-stage diagnostic crate-wide.
+// declared in this crate (no_if_else, type_derived_naming, etc.), so any
+// `#[allow(no_if_else)]` on a state-machine function trips an
+// `unknown_lints` warning under clippy. The lint names ARE valid under
+// the dylint stage where they're registered. Silence the cross-stage
+// diagnostic crate-wide.
 #![allow(unknown_lints)]
 
 extern crate rustc_ast;
@@ -47,13 +48,11 @@ pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lin
     lint_store.register_early_pass(|| Box::new(functions::NoNestedFunctions));
     lint_store.register_early_pass(|| Box::new(functions::OneConstructorName));
 
-    lint_store.register_lints(&[control_flow::NO_LOOP, control_flow::NO_IF_ELSE]);
-    lint_store.register_early_pass(|| Box::new(control_flow::NoLoop));
+    lint_store.register_lints(&[control_flow::NO_IF_ELSE]);
     lint_store.register_early_pass(|| Box::new(control_flow::NoIfElse));
 
-    lint_store.register_lints(&[style::NO_COMMENTS, style::NO_TURBOFISH]);
+    lint_store.register_lints(&[style::NO_COMMENTS]);
     lint_store.register_early_pass(|| Box::new(style::NoComments));
-    lint_store.register_early_pass(|| Box::new(style::NoTurbofish));
 
     lint_store.register_lints(&[
         primitives::RAW_PRIMITIVE_FIELD,

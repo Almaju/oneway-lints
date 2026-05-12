@@ -360,7 +360,7 @@ fn is_local_source_path(path: &std::path::Path) -> bool {
 // machine that tracks paren depth. Iterator combinators can't express the
 // stateful "advance to matching `)`" sweep without becoming strictly less
 // readable than the imperative form.
-#[allow(no_loop, no_if_else, raw_primitive_param)]
+#[allow(no_if_else, raw_primitive_param)]
 fn find_derive_attrs(src: &str) -> Vec<(usize, usize, String)> {
     let bytes = src.as_bytes();
     let needle = b"#[derive(";

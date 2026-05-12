@@ -34,10 +34,8 @@ Click any rule for its full rationale and bad/good examples.
 | [`no_explicit_return`](lints/docs/no_explicit_return.md) | warn | No `return` keyword when a trailing expression works. |
 | [`no_glob_imports`](lints/docs/no_glob_imports.md) | deny | No wildcard imports — every symbol must be named. |
 | [`no_if_else`](lints/docs/no_if_else.md) | warn | Prefer `match` over `if`/`else` chains. |
-| [`no_loop`](lints/docs/no_loop.md) | deny | No `loop`/`while`/`for` — use iterator combinators. |
 | [`no_nested_functions`](lints/docs/no_nested_functions.md) | warn | No functions defined inside other functions. |
 | [`no_panic`](lints/docs/no_panic.md) | deny | No `panic!`/`todo!`/`unimplemented!`/`unreachable!` in non-test code. |
-| [`no_turbofish`](lints/docs/no_turbofish.md) | deny | No `::<>` syntax — annotate the binding instead. |
 | [`no_unwrap`](lints/docs/no_unwrap.md) | deny | No `.unwrap()`/`.expect()` in non-test code. |
 | [`one_constructor_name`](lints/docs/one_constructor_name.md) | deny | Constructors must be named `new` (not `create`/`build`/`init`/…). |
 | [`one_public_type_per_file`](lints/docs/one_public_type_per_file.md) | warn | At most one primary public type per file. |
@@ -58,9 +56,8 @@ Drop a `oneway.toml` at your project root to disable specific rules:
 
 ```toml
 disable = [
-    "no_loop",                # a dylint rule from this crate
-    "type_derived_naming",
-    "clippy::wildcard_imports", # a clippy rule
+    "type_derived_naming",          # a dylint rule from this crate
+    "clippy::wildcard_imports",     # a clippy rule
 ]
 ```
 

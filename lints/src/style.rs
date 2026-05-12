@@ -4,47 +4,6 @@ use rustc_session::{declare_lint, impl_lint_pass};
 use rustc_span::{BytePos, FileName, Span};
 
 declare_lint! {
-    /// **Deny** — don't use turbofish syntax (`::<>`). Annotate the binding's
-    /// type instead.
-    pub NO_TURBOFISH,
-    Deny,
-    "don't use turbofish syntax — annotate the binding instead"
-}
-
-pub struct NoTurbofish;
-impl_lint_pass!(NoTurbofish => [NO_TURBOFISH]);
-
-impl EarlyLintPass for NoTurbofish {
-    fn check_expr(&mut self, early_context: &EarlyContext<'_>, expr: &ast::Expr) {
-        if expr.span.from_expansion() {
-            return;
-        }
-        match &expr.kind {
-            ast::ExprKind::MethodCall(method) => {
-                if method.seg.args.is_some() {
-                    early_context.opt_span_lint(NO_TURBOFISH, Some(method.seg.span()), |diag| {
-                        diag.primary_message(
-                            "turbofish (`::<>`) — annotate the binding's type instead",
-                        );
-                    });
-                }
-            },
-            ast::ExprKind::Path(_, path) => {
-                let turbofish_seg = path.segments.iter().find(|seg| seg.args.is_some());
-                if let Some(seg) = turbofish_seg {
-                    early_context.opt_span_lint(NO_TURBOFISH, Some(seg.span()), |diag| {
-                        diag.primary_message(
-                            "turbofish (`::<>`) — annotate the binding's type instead",
-                        );
-                    });
-                }
-            },
-            _ => {},
-        }
-    }
-}
-
-declare_lint! {
     /// **Deny** — non-doc comments must declare *why* they exist. Allowed:
     /// doc comments (`///`, `//!`, `/** */`, `/*! */`), comments starting
     /// with a label (`WHY:`, `SAFETY:`, `NOTE:`, `HACK:`, `TODO:`, `FIXME:`,
@@ -71,7 +30,7 @@ fn is_local_path(path: &std::path::Path) -> bool {
 // cursor, dispatch on the current byte, continue." Iterator combinators would
 // require a custom Iterator wrapper that re-implements the same state, with
 // no readability gain.
-#[allow(no_loop, no_if_else, raw_primitive_param)]
+#[allow(no_if_else, raw_primitive_param)]
 fn find_comments(src: &str) -> Vec<(usize, usize)> {
     let bytes = src.as_bytes();
     let len = bytes.len();

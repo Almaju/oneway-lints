@@ -73,7 +73,6 @@ The "Tool" column on every rule below tells you which one fires. `cargo oneway` 
 
 | Lint | Severity | Tool | One-liner |
 |------|----------|------|-----------|
-| [`no_loop`](docs/no_loop.md) | deny | dylint | No `loop`/`while`/`for` — use iterators |
 | [`no_if_else`](docs/no_if_else.md) | warn | dylint | Use `match` instead of `if`/`else` chains |
 
 ## Return Style
@@ -100,7 +99,6 @@ The "Tool" column on every rule below tells you which one fires. `cargo oneway` 
 |------|----------|------|-----------|
 | [`no_glob_imports`](docs/no_glob_imports.md) | deny | `clippy::wildcard_imports` | No `use foo::*` — name every import |
 | [`inline_format_args`](docs/inline_format_args.md) | deny | `clippy::uninlined_format_args` | `format!("{x}")` not `format!("{}", x)` |
-| [`no_turbofish`](docs/no_turbofish.md) | deny | dylint | Annotate the binding, not the call site |
 | [`prefer_combinators`](docs/prefer_combinators.md) | warn | `clippy::single_match` + `manual_map` + `manual_unwrap_or` | `.map()` / `.unwrap_or()` over `match` on Option/Result |
 
 ## Documentation

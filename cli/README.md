@@ -27,8 +27,7 @@ Drop a `oneway.toml` at the project root to silence specific rules for that proj
 
 ```toml
 disable = [
-    "no_loop",                  # a dylint rule (from oneway-lints)
-    "type_derived_naming",
+    "type_derived_naming",      # a dylint rule (from oneway-lints)
     "clippy::wildcard_imports", # a clippy rule
 ]
 ```
