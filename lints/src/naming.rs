@@ -170,7 +170,7 @@ struct BindingName<'a>(&'a str);
 
 struct Binding<'a> {
     binding_name: BindingName<'a>,
-    rename_refs: Option<&'a [Span]>,
+    rename_refs: Option<&'a [RefKind]>,
     span: Span,
     ty: &'a ast::Ty,
 }
@@ -179,28 +179,66 @@ struct Rename<'a> {
     decl_span: Span,
     msg: String,
     new_name: String,
-    refs: Option<&'a [Span]>,
+    refs: Option<&'a [RefKind]>,
 }
 
 struct FnContext {
     pat_bindings: HashMap<String, usize>,
-    refs: HashMap<String, Vec<Span>>,
+    refs: HashMap<String, Vec<RefKind>>,
 }
 
-/// Collects single-segment Path expressions throughout a block — these are
-/// the "value reference" sites that need to be renamed alongside the binding.
+/// A discovered reference to a local binding that may need to be renamed
+/// alongside the binding declaration.
+enum RefKind {
+    /// A normal value-position reference: `let _ = id;`
+    Plain(Span),
+    /// A struct-expression shorthand: `Self { source }` is sugar for
+    /// `Self { source: source }`. The span covers only the single
+    /// identifier in source text, but the rename must expand to
+    /// `source: new_name` so the field name still resolves.
+    Shorthand { field_name: String, span: Span },
+}
+
+/// Collects local-binding references — both plain single-segment Path
+/// expressions and struct-expression shorthand fields — for later renaming.
 struct ReferenceCollector<'a> {
-    refs: &'a mut HashMap<String, Vec<Span>>,
+    refs: &'a mut HashMap<String, Vec<RefKind>>,
 }
 
 impl<'ast> Visitor<'ast> for ReferenceCollector<'_> {
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+        if let ast::ExprKind::Struct(struct_expr) = &expr.kind {
+            struct_expr
+                .fields
+                .iter()
+                .for_each(|field| match field.is_shorthand {
+                    false => self.visit_expr(&field.expr),
+                    true => {
+                        let name = field.ident.name.to_string();
+                        self.refs
+                            .entry(name.clone())
+                            .or_default()
+                            .push(RefKind::Shorthand {
+                                field_name: name,
+                                span: field.ident.span,
+                            });
+                    },
+                });
+            // NOTE: still walk into the `..base` rest expression if present.
+            if let ast::StructRest::Base(base) = &struct_expr.rest {
+                self.visit_expr(base);
+            }
+            return;
+        }
         if let ast::ExprKind::Path(None, path) = &expr.kind {
             if path.segments.len() == 1 {
                 let segment = &path.segments[0];
                 if segment.args.is_none() {
                     let name = segment.ident.name.to_string();
-                    self.refs.entry(name).or_default().push(segment.ident.span);
+                    self.refs
+                        .entry(name)
+                        .or_default()
+                        .push(RefKind::Plain(segment.ident.span));
                 }
             }
         }
@@ -346,7 +384,12 @@ impl NamingVisitor<'_> {
                 if let Some(refs) = refs {
                     let mut parts: Vec<(Span, String)> = Vec::with_capacity(refs.len() + 1);
                     parts.push((decl_span, new_name.clone()));
-                    refs.iter().for_each(|s| parts.push((*s, new_name.clone())));
+                    refs.iter().for_each(|ref_kind| match ref_kind {
+                        RefKind::Plain(span) => parts.push((*span, new_name.clone())),
+                        RefKind::Shorthand { field_name, span } => {
+                            parts.push((*span, format!("{field_name}: {new_name}")));
+                        },
+                    });
                     diag.multipart_suggestion(
                         "rename the binding and all references",
                         parts,

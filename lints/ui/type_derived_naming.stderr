@@ -59,5 +59,39 @@ LL ~ pub fn multi_bound_binding_mismatch<Service: Migrator + Connector>(service:
 LL ~     let _ = service;
    |
 
-error: aborting due to 6 previous errors
+error: binding `source` should be named `admin_source` (or `<prefix>_admin_source` / `admin_source_<suffix>`) to match type `AdminSource`
+  --> $DIR/type_derived_naming.rs:61:23
+   |
+LL |     pub fn from_admin(source: AdminSource) -> Self {
+   |                       ^^^^^^
+   |
+help: rename the binding and all references
+   |
+LL ~     pub fn from_admin(admin_source: AdminSource) -> Self {
+LL ~         Self { src: admin_source }
+   |
+
+error: binding `source` should be named `admin_source` (or `<prefix>_admin_source` / `admin_source_<suffix>`) to match type `AdminSource`
+  --> $DIR/type_derived_naming.rs:71:23
+   |
+LL |     pub fn from_admin(source: AdminSource) -> Self {
+   |                       ^^^^^^
+   |
+help: rename the binding and all references
+   |
+LL ~     pub fn from_admin(admin_source: AdminSource) -> Self {
+LL ~         Self { source: admin_source }
+   |
+
+warning: second primary public type in this file — extract into its own file
+  --> $DIR/type_derived_naming.rs:66:1
+   |
+LL | / pub struct ShorthandHolder {
+LL | |     pub source: AdminSource,
+LL | | }
+   | |_^
+   |
+   = note: `#[warn(one_public_type_per_file)]` on by default
+
+error: aborting due to 8 previous errors; 1 warning emitted
 

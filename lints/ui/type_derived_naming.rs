@@ -52,4 +52,25 @@ pub fn multi_bound_binding_mismatch<Service: Migrator + Connector>(thing: Servic
     let _ = thing;
 }
 
+pub struct AdminSource;
+pub struct Holder {
+    pub src: AdminSource,
+}
+
+impl Holder {
+    pub fn from_admin(source: AdminSource) -> Self {
+        Self { src: source }
+    }
+}
+
+pub struct ShorthandHolder {
+    pub source: AdminSource,
+}
+
+impl ShorthandHolder {
+    pub fn from_admin(source: AdminSource) -> Self {
+        Self { source }
+    }
+}
+
 fn main() {}
