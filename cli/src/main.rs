@@ -26,7 +26,6 @@ const CLIPPY_DENY: &[&str] = &[
 
 const DYLINT_GIT: &str = "https://github.com/Almaju/oneway-lints";
 const DYLINT_PATTERN: &str = "lints";
-const DYLINT_LIB: &str = "oneway_lints";
 
 /// Env var that points `cargo oneway` at a local checkout of `oneway-lints`
 /// instead of fetching it from `DYLINT_GIT`. Set this when iterating on the
@@ -155,18 +154,18 @@ fn run_dylint(disabled: &Disabled, fix: bool) -> io::Result<i32> {
     if fix {
         cmd.arg("--fix");
     }
-    // `--path` discovers the lib via the target workspace's metadata, so
-    // `--lib` is redundant there; passing both conflicts with the internal
-    // `--lib` + `--all` check that strict mode (`--fix`) enforces. `--git`
-    // mode points at the whole oneway-lints repo, which has more than one
-    // package, so `--lib` is required there to disambiguate.
+    // Either `--path` or `--git --pattern` picks the library. We deliberately
+    // do not pass `--lib` because it conflicts with dylint's `--all` mode that
+    // gets engaged automatically when `--pattern` is given.
     match env::var(LINTS_PATH_ENV) {
         Ok(path) if !path.is_empty() => {
             cmd.arg("--path").arg(path);
         }
         _ => {
-            cmd.arg("--git").arg(DYLINT_GIT).arg("--pattern").arg(DYLINT_PATTERN);
-            cmd.arg("--lib").arg(DYLINT_LIB);
+            cmd.arg("--git")
+                .arg(DYLINT_GIT)
+                .arg("--pattern")
+                .arg(DYLINT_PATTERN);
         }
     }
     if fix {
