@@ -15,10 +15,12 @@ fn first_unsorted(names: &[String]) -> Option<(usize, String, String)> {
         })
 }
 
+pub struct Msg(pub String);
+
 struct LintEmission<'a> {
     early_context: &'a EarlyContext<'a>,
     lint: &'static rustc_lint::Lint,
-    msg: String,
+    msg: Msg,
     span: Span,
 }
 
@@ -26,7 +28,7 @@ fn emit_lint(lint_emission: LintEmission<'_>) {
     let LintEmission {
         early_context,
         lint,
-        msg,
+        msg: Msg(msg),
         span,
     } = lint_emission;
     early_context.opt_span_lint(lint, Some(span), |diag| {
@@ -60,9 +62,9 @@ impl EarlyLintPass for UnsortedStructFields {
                 emit_lint(LintEmission {
                     early_context,
                     lint: UNSORTED_STRUCT_FIELDS,
-                    msg: format!(
+                    msg: Msg(format!(
                         "struct field `{curr}` should come before `{prev}` (alphabetical order required)"
-                    ),
+                    )),
                     span: fields[idx].span,
                 });
             }
@@ -95,9 +97,9 @@ impl EarlyLintPass for UnsortedEnumVariants {
                 emit_lint(LintEmission {
                     early_context,
                     lint: UNSORTED_ENUM_VARIANTS,
-                    msg: format!(
+                    msg: Msg(format!(
                         "enum variant `{curr}` should come before `{prev}` (alphabetical order required)"
-                    ),
+                    )),
                     span: enum_def.variants[idx].span,
                 });
             }
@@ -146,9 +148,9 @@ impl EarlyLintPass for UnsortedMatchArms {
                 emit_lint(LintEmission {
                     early_context,
                     lint: UNSORTED_MATCH_ARMS,
-                    msg: format!(
+                    msg: Msg(format!(
                         "match arm `{snippet}` appears after wildcard `_`; wildcard must be last"
-                    ),
+                    )),
                     span: *span,
                 });
                 return;
@@ -161,9 +163,9 @@ impl EarlyLintPass for UnsortedMatchArms {
                 emit_lint(LintEmission {
                     early_context,
                     lint: UNSORTED_MATCH_ARMS,
-                    msg: format!(
+                    msg: Msg(format!(
                         "match arm `{curr}` should come before `{prev}` (alphabetical order required)"
-                    ),
+                    )),
                     span: non_wild[idx].2,
                 });
             }
@@ -203,7 +205,7 @@ fn check_mod_after_use<T: std::ops::Deref<Target = ast::Item>>(
             emit_lint(LintEmission {
                 early_context,
                 lint: MOD_AFTER_USE,
-                msg: "`mod` declaration must come before any `use` statement".to_string(),
+                msg: Msg("`mod` declaration must come before any `use` statement".to_string()),
                 span,
             });
         });
@@ -295,11 +297,11 @@ impl EarlyLintPass for UnsortedImplMethods {
                 emit_lint(LintEmission {
                     early_context,
                     lint: UNSORTED_IMPL_METHODS,
-                    msg: format!(
+                    msg: Msg(format!(
                         "{} method `{curr_name}` must come before {} method `{prev_name}` (group order: static, public, private)",
                         curr_group.label(),
                         prev_group.label(),
-                    ),
+                    )),
                     span: *curr_span,
                 });
                 return;
@@ -324,10 +326,10 @@ impl EarlyLintPass for UnsortedImplMethods {
                 emit_lint(LintEmission {
                     early_context,
                     lint: UNSORTED_IMPL_METHODS,
-                    msg: format!(
+                    msg: Msg(format!(
                         "{} method `{curr}` should come before `{prev}` (alphabetical within group)",
                         group.label(),
-                    ),
+                    )),
                     span,
                 });
             }
@@ -423,9 +425,9 @@ impl EarlyLintPass for UnsortedDerives {
                     emit_lint(LintEmission {
                         early_context,
                         lint: UNSORTED_DERIVES,
-                        msg: format!(
+                        msg: Msg(format!(
                             "derive trait `{curr}` should come before `{prev}` (alphabetical order required)"
-                        ),
+                        )),
                         span,
                     });
                 }

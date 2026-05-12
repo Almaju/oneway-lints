@@ -244,30 +244,6 @@ fn line_is_justified(line: &str) -> bool {
         .any(|(i, &b)| b == b'#' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit))
 }
 
-struct CommentPair<'a> {
-    a_end: usize,
-    b_start: usize,
-    src: &'a str,
-}
-
-/// True if `a` (a `//` line comment) and `b` (the next comment) are part of
-/// the same logical comment block: they sit on adjacent lines with only
-/// whitespace before the second `//`.
-fn line_comments_are_consecutive(comment_pair: &CommentPair<'_>) -> bool {
-    let CommentPair {
-        a_end,
-        b_start,
-        src,
-    } = *comment_pair;
-    let bytes = src.as_bytes();
-    if a_end >= b_start || bytes.get(a_end) != Some(&b'\n') {
-        return false;
-    }
-    bytes[a_end + 1..b_start]
-        .iter()
-        .all(|&c| c == b' ' || c == b'\t')
-}
-
 #[allow(raw_primitive_param)]
 fn is_block_comment(src: &str, lo: usize) -> bool {
     src.as_bytes().get(lo..lo + 2) == Some(b"/*")
@@ -277,6 +253,7 @@ fn is_block_comment(src: &str, lo: usize) -> bool {
 /// Block comments (`/* */`) are always their own group.
 #[allow(raw_primitive_param)]
 fn group_comments(src: &str, comments: &[(usize, usize)]) -> Vec<Vec<(usize, usize)>> {
+    let bytes = src.as_bytes();
     let mut groups: Vec<Vec<(usize, usize)>> = Vec::new();
     comments.iter().for_each(|&range| {
         let (lo, _) = range;
@@ -284,12 +261,15 @@ fn group_comments(src: &str, comments: &[(usize, usize)]) -> Vec<Vec<(usize, usi
         let extend_into = match block {
             false => groups.last_mut().filter(|g| {
                 g.last().is_some_and(|&(prev_lo, prev_hi)| {
-                    !is_block_comment(src, prev_lo)
-                        && line_comments_are_consecutive(&CommentPair {
-                            a_end: prev_hi,
-                            b_start: lo,
-                            src,
-                        })
+                    if is_block_comment(src, prev_lo) {
+                        return false;
+                    }
+                    if prev_hi >= lo || bytes.get(prev_hi) != Some(&b'\n') {
+                        return false;
+                    }
+                    bytes[prev_hi + 1..lo]
+                        .iter()
+                        .all(|&c| c == b' ' || c == b'\t')
                 })
             }),
             true => None,

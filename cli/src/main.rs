@@ -41,9 +41,21 @@ struct Disabled {
     dylint: Vec<String>,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FixMode {
+    Off,
+    On,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum FmtMode {
+    Apply,
+    Check,
+}
+
 struct LintOpts<'a> {
     disabled: &'a Disabled,
-    fix: bool,
+    fix_mode: FixMode,
     passthrough: &'a [String],
 }
 
@@ -88,12 +100,13 @@ fn user_args() -> Vec<String> {
 /// because we forward each fixable flag to the underlying tool ourselves
 /// (clippy and dylint both accept `--fix`, but each also needs
 /// `--allow-dirty --allow-staged` to be usable on a working tree).
-fn extract_fix(args: &mut Vec<String>) -> bool {
-    if let Some(pos) = args.iter().position(|a| a == "--fix") {
-        args.remove(pos);
-        true
-    } else {
-        false
+fn extract_fix(args: &mut Vec<String>) -> FixMode {
+    match args.iter().position(|a| a == "--fix") {
+        None => FixMode::Off,
+        Some(pos) => {
+            args.remove(pos);
+            FixMode::On
+        },
     }
 }
 
@@ -119,29 +132,36 @@ fn run(mut command: Command) -> io::Result<i32> {
     Ok(command.status()?.code().unwrap_or(1))
 }
 
-fn run_fmt(passthrough: &[String], check: bool) -> io::Result<i32> {
+fn run_fmt(passthrough: &[String], fmt_mode: FmtMode) -> io::Result<i32> {
     let dir = write_config_dir()?;
-    let mut cmd = Command::new("cargo");
-    cmd.arg("fmt");
-    cmd.args(passthrough);
-    if check {
-        cmd.arg("--check");
+    let mut command = Command::new("cargo");
+    command.arg("fmt");
+    command.args(passthrough);
+    match fmt_mode {
+        FmtMode::Apply => {},
+        FmtMode::Check => {
+            command.arg("--check");
+        },
     }
-    cmd.arg("--")
+    command
+        .arg("--")
         .arg("--config-path")
         .arg(dir.join("rustfmt.toml"));
-    run(cmd)
+    run(command)
 }
 
 fn run_clippy(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
     let dir = write_config_dir()?;
     let mut command = Command::new("cargo");
     command.arg("clippy");
-    if lint_opts.fix {
-        command
-            .arg("--fix")
-            .arg("--allow-dirty")
-            .arg("--allow-staged");
+    match lint_opts.fix_mode {
+        FixMode::Off => {},
+        FixMode::On => {
+            command
+                .arg("--fix")
+                .arg("--allow-dirty")
+                .arg("--allow-staged");
+        },
     }
     command.args(lint_opts.passthrough);
     command.arg("--");
@@ -159,8 +179,11 @@ fn run_clippy(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
 fn run_dylint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
     let mut command = Command::new("cargo");
     command.arg("dylint");
-    if lint_opts.fix {
-        command.arg("--fix");
+    match lint_opts.fix_mode {
+        FixMode::Off => {},
+        FixMode::On => {
+            command.arg("--fix");
+        },
     }
     // WHY: either `--path` or `--git --pattern` picks the library. We deliberately
     // do not pass `--lib` because it conflicts with dylint's `--all` mode that
@@ -177,8 +200,11 @@ fn run_dylint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
                 .arg(DYLINT_PATTERN);
         },
     }
-    if lint_opts.fix {
-        command.arg("--").arg("--allow-dirty").arg("--allow-staged");
+    match lint_opts.fix_mode {
+        FixMode::Off => {},
+        FixMode::On => {
+            command.arg("--").arg("--allow-dirty").arg("--allow-staged");
+        },
     }
     // WHY: per-lint allow-overrides go through RUSTFLAGS — dylint forwards
     // post-`--` args to cargo check, which doesn't pass them to rustc as
@@ -208,7 +234,11 @@ fn run_lint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
 }
 
 fn run_all(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
-    let fmt = run_fmt(lint_opts.passthrough, !lint_opts.fix)?;
+    let fmt_mode = match lint_opts.fix_mode {
+        FixMode::Off => FmtMode::Check,
+        FixMode::On => FmtMode::Apply,
+    };
+    let fmt = run_fmt(lint_opts.passthrough, fmt_mode)?;
     let clippy = run_clippy(lint_opts)?;
     let dylint = run_dylint(lint_opts)?;
     Ok([fmt, clippy, dylint]
@@ -255,13 +285,13 @@ PREREQUISITES:
 
 fn dispatch() -> io::Result<i32> {
     let mut args = user_args();
-    let fix = extract_fix(&mut args);
+    let fix_mode = extract_fix(&mut args);
     let disabled = read_disabled();
     let subcommand = args.first().map(String::as_str);
     let passthrough = args.get(1..).unwrap_or(&[]);
     let lint_opts = LintOpts {
         disabled: &disabled,
-        fix,
+        fix_mode,
         passthrough,
     };
     match subcommand {
@@ -270,7 +300,7 @@ fn dispatch() -> io::Result<i32> {
             print_help();
             Ok(0)
         },
-        Some("fmt") => run_fmt(passthrough, false),
+        Some("fmt") => run_fmt(passthrough, FmtMode::Apply),
         Some("lint") => run_lint(&lint_opts),
         Some(other) => {
             eprintln!("cargo-oneway: unknown subcommand `{other}` — try `cargo oneway help`");

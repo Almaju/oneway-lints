@@ -96,8 +96,10 @@ fn is_stdlib_container(name: &str) -> bool {
     )
 }
 
+struct BindingName<'a>(&'a str);
+
 struct NameCheck<'a> {
-    binding_name: &'a str,
+    binding_name: BindingName<'a>,
     early_context: &'a EarlyContext<'a>,
     span: Span,
     ty: &'a ast::Ty,
@@ -105,7 +107,7 @@ struct NameCheck<'a> {
 
 fn check_name(name_check: NameCheck<'_>) {
     let NameCheck {
-        binding_name,
+        binding_name: BindingName(binding_name),
         early_context,
         span,
         ty,
@@ -147,7 +149,7 @@ impl EarlyLintPass for TypeDerivedNaming {
             return;
         };
         check_name(NameCheck {
-            binding_name: ident.name.as_str(),
+            binding_name: BindingName(ident.name.as_str()),
             early_context,
             span: local.pat.span,
             ty,
@@ -162,7 +164,7 @@ impl EarlyLintPass for TypeDerivedNaming {
             return;
         };
         check_name(NameCheck {
-            binding_name: ident.name.as_str(),
+            binding_name: BindingName(ident.name.as_str()),
             early_context,
             span: param.pat.span,
             ty: &param.ty,
