@@ -41,34 +41,39 @@ struct Disabled {
     dylint: Vec<String>,
 }
 
+struct LintOpts<'a> {
+    disabled: &'a Disabled,
+    fix: bool,
+    passthrough: &'a [String],
+}
+
 /// Read `oneway.toml` from the current directory and partition `disable = [...]`
 /// entries into clippy-prefixed names and bare dylint lint names.
 fn read_disabled() -> Disabled {
     let Ok(content) = fs::read_to_string(ONEWAY_TOML) else {
         return Disabled::default();
     };
-    let parsed: toml::Value = match content.parse() {
-        Ok(v) => v,
+    let value: toml::Value = match content.parse() {
         Err(e) => {
             eprintln!("cargo-oneway: {ONEWAY_TOML}: {e}");
             return Disabled::default();
-        }
+        },
+        Ok(v) => v,
     };
-    let Some(array) = parsed.get("disable").and_then(toml::Value::as_array) else {
+    let Some(array) = value.get("disable").and_then(toml::Value::as_array) else {
         return Disabled::default();
     };
-    let mut out = Disabled::default();
-    for entry in array {
-        let Some(name) = entry.as_str() else { continue };
-        if let Some(rest) = name.strip_prefix("clippy::") {
-            if !rest.is_empty() {
-                out.clippy.push(name.to_string());
+    array.iter().filter_map(|entry| entry.as_str()).fold(
+        Disabled::default(),
+        |mut disabled, name| {
+            match name.strip_prefix("clippy::") {
+                None => disabled.dylint.push(name.to_string()),
+                Some("") => {},
+                Some(_) => disabled.clippy.push(name.to_string()),
             }
-        } else {
-            out.dylint.push(name.to_string());
-        }
-    }
-    out
+            disabled
+        },
+    )
 }
 
 fn user_args() -> Vec<String> {
@@ -100,18 +105,18 @@ fn write_config_dir() -> io::Result<PathBuf> {
     Ok(dir)
 }
 
-fn announce(cmd: &Command) {
-    let program = cmd.get_program().to_string_lossy();
-    let args: Vec<String> = cmd
+fn announce(command: &Command) {
+    let program = command.get_program().to_string_lossy();
+    let args: Vec<String> = command
         .get_args()
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
     eprintln!("$ {} {}", program, args.join(" "));
 }
 
-fn run(mut cmd: Command) -> io::Result<i32> {
-    announce(&cmd);
-    Ok(cmd.status()?.code().unwrap_or(1))
+fn run(mut command: Command) -> io::Result<i32> {
+    announce(&command);
+    Ok(command.status()?.code().unwrap_or(1))
 }
 
 fn run_fmt(passthrough: &[String], check: bool) -> io::Result<i32> {
@@ -128,77 +133,84 @@ fn run_fmt(passthrough: &[String], check: bool) -> io::Result<i32> {
     run(cmd)
 }
 
-fn run_clippy(passthrough: &[String], disabled: &Disabled, fix: bool) -> io::Result<i32> {
+fn run_clippy(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
     let dir = write_config_dir()?;
-    let mut cmd = Command::new("cargo");
-    cmd.arg("clippy");
-    if fix {
-        cmd.arg("--fix").arg("--allow-dirty").arg("--allow-staged");
+    let mut command = Command::new("cargo");
+    command.arg("clippy");
+    if lint_opts.fix {
+        command
+            .arg("--fix")
+            .arg("--allow-dirty")
+            .arg("--allow-staged");
     }
-    cmd.args(passthrough);
-    cmd.arg("--");
-    for lint in CLIPPY_DENY {
-        cmd.arg("-D").arg(lint);
-    }
-    // Allow-overrides come after, so they win over the deny defaults.
-    for lint in &disabled.clippy {
-        cmd.arg("-A").arg(lint);
-    }
-    cmd.env("CLIPPY_CONF_DIR", &dir);
-    run(cmd)
+    command.args(lint_opts.passthrough);
+    command.arg("--");
+    CLIPPY_DENY.iter().for_each(|lint| {
+        command.arg("-D").arg(lint);
+    });
+    // WHY: allow-overrides come after the deny defaults so per-project opt-outs win.
+    lint_opts.disabled.clippy.iter().for_each(|lint| {
+        command.arg("-A").arg(lint);
+    });
+    command.env("CLIPPY_CONF_DIR", &dir);
+    run(command)
 }
 
-fn run_dylint(disabled: &Disabled, fix: bool) -> io::Result<i32> {
-    let mut cmd = Command::new("cargo");
-    cmd.arg("dylint");
-    if fix {
-        cmd.arg("--fix");
+fn run_dylint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
+    let mut command = Command::new("cargo");
+    command.arg("dylint");
+    if lint_opts.fix {
+        command.arg("--fix");
     }
-    // Either `--path` or `--git --pattern` picks the library. We deliberately
+    // WHY: either `--path` or `--git --pattern` picks the library. We deliberately
     // do not pass `--lib` because it conflicts with dylint's `--all` mode that
     // gets engaged automatically when `--pattern` is given.
     match env::var(LINTS_PATH_ENV) {
         Ok(path) if !path.is_empty() => {
-            cmd.arg("--path").arg(path);
-        }
+            command.arg("--path").arg(path);
+        },
         _ => {
-            cmd.arg("--git")
+            command
+                .arg("--git")
                 .arg(DYLINT_GIT)
                 .arg("--pattern")
                 .arg(DYLINT_PATTERN);
-        }
+        },
     }
-    if fix {
-        cmd.arg("--").arg("--allow-dirty").arg("--allow-staged");
+    if lint_opts.fix {
+        command.arg("--").arg("--allow-dirty").arg("--allow-staged");
     }
-    // Per-lint allow-overrides go through RUSTFLAGS — dylint forwards
+    // WHY: per-lint allow-overrides go through RUSTFLAGS — dylint forwards
     // post-`--` args to cargo check, which doesn't pass them to rustc as
     // lint flags. RUSTFLAGS hits rustc directly.
-    if !disabled.dylint.is_empty() {
-        let existing = env::var("RUSTFLAGS").unwrap_or_default();
-        let mut flags = existing;
-        for lint in &disabled.dylint {
-            if !flags.is_empty() {
-                flags.push(' ');
-            }
-            flags.push_str("-A ");
-            flags.push_str(lint);
-        }
-        cmd.env("RUSTFLAGS", flags);
+    let parts: Vec<String> = env::var("RUSTFLAGS")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .into_iter()
+        .chain(
+            lint_opts
+                .disabled
+                .dylint
+                .iter()
+                .map(|lint| format!("-A {lint}")),
+        )
+        .collect();
+    if !parts.is_empty() {
+        command.env("RUSTFLAGS", parts.join(" "));
     }
-    run(cmd)
+    run(command)
 }
 
-fn run_lint(passthrough: &[String], disabled: &Disabled, fix: bool) -> io::Result<i32> {
-    let clippy = run_clippy(passthrough, disabled, fix)?;
-    let dylint = run_dylint(disabled, fix)?;
-    Ok(if clippy != 0 { clippy } else { dylint })
+fn run_lint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
+    let clippy = run_clippy(lint_opts)?;
+    let dylint = run_dylint(lint_opts)?;
+    Ok([clippy, dylint].into_iter().find(|&c| c != 0).unwrap_or(0))
 }
 
-fn run_all(disabled: &Disabled, fix: bool) -> io::Result<i32> {
-    let fmt = run_fmt(&[], !fix)?;
-    let clippy = run_clippy(&[], disabled, fix)?;
-    let dylint = run_dylint(disabled, fix)?;
+fn run_all(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
+    let fmt = run_fmt(lint_opts.passthrough, !lint_opts.fix)?;
+    let clippy = run_clippy(lint_opts)?;
+    let dylint = run_dylint(lint_opts)?;
     Ok([fmt, clippy, dylint]
         .into_iter()
         .find(|&c| c != 0)
@@ -245,28 +257,35 @@ fn dispatch() -> io::Result<i32> {
     let mut args = user_args();
     let fix = extract_fix(&mut args);
     let disabled = read_disabled();
-    match args.first().map(String::as_str) {
-        Some("fmt") => run_fmt(&args[1..], false),
-        Some("lint") => run_lint(&args[1..], &disabled, fix),
-        Some("help") | Some("-h") | Some("--help") => {
+    let subcommand = args.first().map(String::as_str);
+    let passthrough = args.get(1..).unwrap_or(&[]);
+    let lint_opts = LintOpts {
+        disabled: &disabled,
+        fix,
+        passthrough,
+    };
+    match subcommand {
+        None => run_all(&lint_opts),
+        Some("--help") | Some("-h") | Some("help") => {
             print_help();
             Ok(0)
-        }
-        None => run_all(&disabled, fix),
+        },
+        Some("fmt") => run_fmt(passthrough, false),
+        Some("lint") => run_lint(&lint_opts),
         Some(other) => {
             eprintln!("cargo-oneway: unknown subcommand `{other}` — try `cargo oneway help`");
             Ok(2)
-        }
+        },
     }
 }
 
 fn main() -> ExitCode {
     match dispatch() {
-        Ok(0) => ExitCode::SUCCESS,
-        Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),
         Err(e) => {
             eprintln!("cargo-oneway: {e}");
             ExitCode::FAILURE
-        }
+        },
+        Ok(0) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(code.clamp(1, 255) as u8),
     }
 }

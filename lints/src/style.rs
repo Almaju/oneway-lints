@@ -3,10 +3,6 @@ use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
 use rustc_session::{declare_lint, impl_lint_pass};
 use rustc_span::{BytePos, FileName, Span};
 
-// ---------------------------------------------------------------------------
-// NO_TURBOFISH
-// ---------------------------------------------------------------------------
-
 declare_lint! {
     /// **Deny** — don't use turbofish syntax (`::<>`). Annotate the binding's
     /// type instead.
@@ -19,40 +15,34 @@ pub struct NoTurbofish;
 impl_lint_pass!(NoTurbofish => [NO_TURBOFISH]);
 
 impl EarlyLintPass for NoTurbofish {
-    fn check_expr(&mut self, cx: &EarlyContext<'_>, expr: &ast::Expr) {
+    fn check_expr(&mut self, early_context: &EarlyContext<'_>, expr: &ast::Expr) {
         if expr.span.from_expansion() {
             return;
         }
         match &expr.kind {
             ast::ExprKind::MethodCall(method) => {
                 if method.seg.args.is_some() {
-                    cx.opt_span_lint(NO_TURBOFISH, Some(method.seg.span()), |diag| {
+                    early_context.opt_span_lint(NO_TURBOFISH, Some(method.seg.span()), |diag| {
                         diag.primary_message(
                             "turbofish (`::<>`) — annotate the binding's type instead",
                         );
                     });
                 }
-            }
+            },
             ast::ExprKind::Path(_, path) => {
-                for seg in &path.segments {
-                    if seg.args.is_some() {
-                        cx.opt_span_lint(NO_TURBOFISH, Some(seg.span()), |diag| {
-                            diag.primary_message(
-                                "turbofish (`::<>`) — annotate the binding's type instead",
-                            );
-                        });
-                        break;
-                    }
+                let turbofish_seg = path.segments.iter().find(|seg| seg.args.is_some());
+                if let Some(seg) = turbofish_seg {
+                    early_context.opt_span_lint(NO_TURBOFISH, Some(seg.span()), |diag| {
+                        diag.primary_message(
+                            "turbofish (`::<>`) — annotate the binding's type instead",
+                        );
+                    });
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// NO_COMMENTS
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Deny** — non-doc comments must declare *why* they exist. Allowed:
@@ -74,10 +64,14 @@ fn is_local_path(path: &std::path::Path) -> bool {
         && !s.starts_with("<")
 }
 
-/// Scan source text and return byte ranges of every non-doc line and block
-/// comment. Doc comments (`///`, `//!`, `/** */`, `/*! */`) are skipped so
-/// they remain available for docs.rs output. Carefully skips comments inside
-/// string, raw-string, byte-string, and char literals.
+// WHY: hand-rolled byte-level lexer that scans Rust source for comments while
+// correctly skipping string, raw-string, byte-string, and char literals (and
+// distinguishing char literals from lifetimes). This is a state machine; the
+// `while`/`if`-`else if` shape is the clearest expression of "advance the
+// cursor, dispatch on the current byte, continue." Iterator combinators would
+// require a custom Iterator wrapper that re-implements the same state, with
+// no readability gain.
+#[allow(no_loop, no_if_else, raw_primitive_param)]
 fn find_comments(src: &str) -> Vec<(usize, usize)> {
     let bytes = src.as_bytes();
     let len = bytes.len();
@@ -91,23 +85,23 @@ fn find_comments(src: &str) -> Vec<(usize, usize)> {
             i += 1;
             while i < len {
                 match bytes[i] {
-                    b'\\' if i + 1 < len => i += 2,
                     b'"' => {
                         i += 1;
                         break;
-                    }
+                    },
+                    b'\\' if i + 1 < len => i += 2,
                     _ => i += 1,
                 }
             }
             continue;
         }
 
-        // Raw string: r"..." / r#"..."# / br"..." / br#"..."#
+        // NOTE: raw string forms — r"..." / r#"..."# / br"..." / br#"..."#
         let raw_start = match (b, bytes.get(i + 1).copied()) {
-            (b'r', Some(c)) if c == b'"' || c == b'#' => Some(i + 1),
             (b'b', Some(b'r')) if bytes.get(i + 2).is_some_and(|&c| c == b'"' || c == b'#') => {
                 Some(i + 2)
-            }
+            },
+            (b'r', Some(c)) if c == b'"' || c == b'#' => Some(i + 1),
             _ => None,
         };
         if let Some(after_prefix) = raw_start {
@@ -138,9 +132,9 @@ fn find_comments(src: &str) -> Vec<(usize, usize)> {
             }
         }
 
-        // Char literal or lifetime: scan forward to see whether a closing
-        // `'` shows up before non-identifier chars.  If yes, char literal;
-        // if no, lifetime (skip one byte).
+        // WHY: a leading `'` could be a char literal or a lifetime. Scan
+        // forward for a closing `'` before any non-identifier char: if found,
+        // char literal; otherwise, lifetime (skip one byte).
         if b == b'\'' {
             let mut k = i + 1;
             let mut probe = 0;
@@ -171,21 +165,6 @@ fn find_comments(src: &str) -> Vec<(usize, usize)> {
 
         if b == b'/' && i + 1 < len {
             match bytes[i + 1] {
-                b'/' => {
-                    let start = i;
-                    let third = bytes.get(i + 2).copied();
-                    let fourth = bytes.get(i + 3).copied();
-                    let is_outer_doc = third == Some(b'/') && fourth != Some(b'/');
-                    let is_inner_doc = third == Some(b'!');
-                    let is_doc = is_outer_doc || is_inner_doc;
-                    while i < len && bytes[i] != b'\n' {
-                        i += 1;
-                    }
-                    if !is_doc {
-                        out.push((start, i));
-                    }
-                    continue;
-                }
                 b'*' => {
                     let start = i;
                     let third = bytes.get(i + 2).copied();
@@ -211,8 +190,23 @@ fn find_comments(src: &str) -> Vec<(usize, usize)> {
                         out.push((start, i));
                     }
                     continue;
-                }
-                _ => {}
+                },
+                b'/' => {
+                    let start = i;
+                    let third = bytes.get(i + 2).copied();
+                    let fourth = bytes.get(i + 3).copied();
+                    let is_outer_doc = third == Some(b'/') && fourth != Some(b'/');
+                    let is_inner_doc = third == Some(b'!');
+                    let is_doc = is_outer_doc || is_inner_doc;
+                    while i < len && bytes[i] != b'\n' {
+                        i += 1;
+                    }
+                    if !is_doc {
+                        out.push((start, i));
+                    }
+                    continue;
+                },
+                _ => {},
             }
         }
 
@@ -222,23 +216,21 @@ fn find_comments(src: &str) -> Vec<(usize, usize)> {
     out
 }
 
-const ALLOWED_LABELS: &[&str] = &[
-    "FIXME", "HACK", "NOTE", "PERF", "SAFETY", "TODO", "WHY",
-];
+const ALLOWED_LABELS: &[&str] = &["FIXME", "HACK", "NOTE", "PERF", "SAFETY", "TODO", "WHY"];
 
 /// Returns true if the given line of comment content carries a label, link,
 /// or ticket reference that justifies the comment's existence.
+#[allow(raw_primitive_param)]
 fn line_is_justified(line: &str) -> bool {
-    let trimmed = line
-        .trim_start_matches(|c: char| c == '/' || c == '*')
-        .trim_start();
+    let trimmed = line.trim_start_matches(['/', '*']).trim_start();
 
-    for label in ALLOWED_LABELS {
-        if let Some(rest) = trimmed.strip_prefix(label) {
-            if rest.starts_with(':') {
-                return true;
-            }
-        }
+    let has_label = ALLOWED_LABELS.iter().any(|label| {
+        trimmed
+            .strip_prefix(label)
+            .is_some_and(|rest| rest.starts_with(':'))
+    });
+    if has_label {
+        return true;
     }
 
     if trimmed.contains("http://") || trimmed.contains("https://") {
@@ -246,19 +238,27 @@ fn line_is_justified(line: &str) -> bool {
     }
 
     let bytes = trimmed.as_bytes();
-    for (i, &b) in bytes.iter().enumerate() {
-        if b == b'#' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit) {
-            return true;
-        }
-    }
+    bytes
+        .iter()
+        .enumerate()
+        .any(|(i, &b)| b == b'#' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit))
+}
 
-    false
+struct CommentPair<'a> {
+    a_end: usize,
+    b_start: usize,
+    src: &'a str,
 }
 
 /// True if `a` (a `//` line comment) and `b` (the next comment) are part of
 /// the same logical comment block: they sit on adjacent lines with only
 /// whitespace before the second `//`.
-fn line_comments_are_consecutive(src: &str, a_end: usize, b_start: usize) -> bool {
+fn line_comments_are_consecutive(comment_pair: &CommentPair<'_>) -> bool {
+    let CommentPair {
+        a_end,
+        b_start,
+        src,
+    } = *comment_pair;
     let bytes = src.as_bytes();
     if a_end >= b_start || bytes.get(a_end) != Some(&b'\n') {
         return false;
@@ -268,31 +268,37 @@ fn line_comments_are_consecutive(src: &str, a_end: usize, b_start: usize) -> boo
         .all(|&c| c == b' ' || c == b'\t')
 }
 
+#[allow(raw_primitive_param)]
 fn is_block_comment(src: &str, lo: usize) -> bool {
     src.as_bytes().get(lo..lo + 2) == Some(b"/*")
 }
 
 /// Group consecutive `//` line comments into logical comment blocks.
 /// Block comments (`/* */`) are always their own group.
+#[allow(raw_primitive_param)]
 fn group_comments(src: &str, comments: &[(usize, usize)]) -> Vec<Vec<(usize, usize)>> {
     let mut groups: Vec<Vec<(usize, usize)>> = Vec::new();
-    for &range in comments {
+    comments.iter().for_each(|&range| {
         let (lo, _) = range;
         let block = is_block_comment(src, lo);
-        let extend = !block
-            && groups
-                .last()
-                .and_then(|g| g.last().copied())
-                .is_some_and(|(prev_lo, prev_hi)| {
+        let extend_into = match block {
+            false => groups.last_mut().filter(|g| {
+                g.last().is_some_and(|&(prev_lo, prev_hi)| {
                     !is_block_comment(src, prev_lo)
-                        && line_comments_are_consecutive(src, prev_hi, lo)
-                });
-        if extend {
-            groups.last_mut().unwrap().push(range);
-        } else {
-            groups.push(vec![range]);
+                        && line_comments_are_consecutive(&CommentPair {
+                            a_end: prev_hi,
+                            b_start: lo,
+                            src,
+                        })
+                })
+            }),
+            true => None,
+        };
+        match extend_into {
+            None => groups.push(vec![range]),
+            Some(group) => group.push(range),
         }
-    }
+    });
     groups
 }
 
@@ -300,40 +306,38 @@ pub struct NoComments;
 impl_lint_pass!(NoComments => [NO_COMMENTS]);
 
 impl EarlyLintPass for NoComments {
-    fn check_crate(&mut self, cx: &EarlyContext<'_>, _krate: &ast::Crate) {
-        let source_map = cx.sess().source_map();
-        for file in source_map.files().iter() {
+    fn check_crate(&mut self, early_context: &EarlyContext<'_>, _krate: &ast::Crate) {
+        let source_map = early_context.sess().source_map();
+        source_map.files().iter().for_each(|file| {
             let path = match &file.name {
                 FileName::Real(real) => real.local_path_if_available().to_path_buf(),
-                _ => continue,
+                _ => return,
             };
             if !is_local_path(&path) {
-                continue;
+                return;
             }
-            let Some(src) = file.src.as_ref() else { continue };
+            let Some(src) = file.src.as_ref() else {
+                return;
+            };
             let base = file.start_pos;
             let comments = find_comments(src);
-            for group in group_comments(src, &comments) {
-                let group_text: String = group
-                    .iter()
-                    .map(|&(lo, hi)| &src[lo..hi])
-                    .collect::<Vec<_>>()
-                    .join("\n");
+            group_comments(src, &comments).into_iter().for_each(|group| {
+                let parts: Vec<&str> = group.iter().map(|&(lo, hi)| &src[lo..hi]).collect();
+                let group_text = parts.join("\n");
                 if group_text.lines().any(line_is_justified) {
-                    continue;
+                    return;
                 }
-                let (lo, _) = group[0];
-                let (_, hi) = *group.last().unwrap();
-                let span = Span::with_root_ctxt(
-                    base + BytePos(lo as u32),
-                    base + BytePos(hi as u32),
-                );
-                cx.opt_span_lint(NO_COMMENTS, Some(span), |diag| {
+                let Some((&(lo, _), &(_, hi))) = group.first().zip(group.last()) else {
+                    return;
+                };
+                let span =
+                    Span::with_root_ctxt(base + BytePos(lo as u32), base + BytePos(hi as u32));
+                early_context.opt_span_lint(NO_COMMENTS, Some(span), |diag| {
                     diag.primary_message(
                         "comment must declare its purpose — prefix with `WHY:`, `SAFETY:`, `NOTE:`, `HACK:`, `TODO:`, `FIXME:`, `PERF:`, or include a link or `#1234` ticket ref",
                     );
                 });
-            }
-        }
+            });
+        });
     }
 }

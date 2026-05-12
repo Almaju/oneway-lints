@@ -1,5 +1,11 @@
 #![feature(rustc_private)]
 #![allow(unused_extern_crates)]
+// WHY: rustc's clippy stage doesn't know about the dylint-defined lints
+// declared in this crate (no_loop, no_if_else, type_derived_naming, etc.),
+// so `#[allow(no_loop)]` on a state-machine function trips an `unknown_lints`
+// warning under clippy. The lint names ARE valid under the dylint stage
+// where they're registered. Silence the cross-stage diagnostic crate-wide.
+#![allow(unknown_lints)]
 
 extern crate rustc_ast;
 extern crate rustc_lint;

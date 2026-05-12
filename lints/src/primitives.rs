@@ -17,15 +17,11 @@ fn primitive_name(ty: &ast::Ty) -> Option<&'static str> {
         {
             let name = path.segments[0].ident.name.as_str();
             PRIMITIVES.iter().copied().find(|&p| p == name)
-        }
+        },
         ast::TyKind::Ref(_, mut_ty) => primitive_name(&mut_ty.ty),
         _ => None,
     }
 }
-
-// ---------------------------------------------------------------------------
-// RAW_PRIMITIVE_FIELD
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Warn** — struct fields should use newtypes instead of raw primitives.
@@ -38,31 +34,31 @@ pub struct RawPrimitiveField;
 impl_lint_pass!(RawPrimitiveField => [RAW_PRIMITIVE_FIELD]);
 
 impl EarlyLintPass for RawPrimitiveField {
-    fn check_item(&mut self, cx: &EarlyContext<'_>, item: &ast::Item) {
+    fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
         if item.span.from_expansion() {
             return;
         }
         let ast::ItemKind::Struct(_, _, ref vdata) = item.kind else {
             return;
         };
-        for field in vdata.fields() {
-            let Some(name) = field.ident else { continue };
-            let Some(primitive) = primitive_name(&field.ty) else {
-                continue;
-            };
-            cx.opt_span_lint(RAW_PRIMITIVE_FIELD, Some(field.ty.span), |diag| {
-                diag.primary_message(format!(
-                    "field `{}` uses raw primitive `{primitive}` — wrap it in a newtype",
-                    name.name
-                ));
+        vdata
+            .fields()
+            .iter()
+            .filter_map(|field| {
+                let name = field.ident?;
+                let primitive = primitive_name(&field.ty)?;
+                Some((name, primitive, field.ty.span))
+            })
+            .for_each(|(name, primitive, span)| {
+                early_context.opt_span_lint(RAW_PRIMITIVE_FIELD, Some(span), |diag| {
+                    diag.primary_message(format!(
+                        "field `{}` uses raw primitive `{primitive}` — wrap it in a newtype",
+                        name.name
+                    ));
+                });
             });
-        }
     }
 }
-
-// ---------------------------------------------------------------------------
-// RAW_PRIMITIVE_PARAM
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Warn** — function parameters should use newtypes instead of raw
@@ -76,29 +72,39 @@ pub struct RawPrimitiveParam;
 impl_lint_pass!(RawPrimitiveParam => [RAW_PRIMITIVE_PARAM]);
 
 impl EarlyLintPass for RawPrimitiveParam {
-    fn check_fn(&mut self, cx: &EarlyContext<'_>, kind: FnKind<'_>, _span: Span, _id: NodeId) {
-        let FnKind::Fn(_, _, fn_box) = kind else {
+    fn check_fn(
+        &mut self,
+        early_context: &EarlyContext<'_>,
+        fn_kind: FnKind<'_>,
+        _span: Span,
+        _id: NodeId,
+    ) {
+        let FnKind::Fn(_, _, fn_box) = fn_kind else {
             return;
         };
         if fn_box.body.is_none() {
             return;
         }
-        for param in &fn_box.sig.decl.inputs {
-            if param.span.from_expansion() || param.is_self() {
-                continue;
-            }
-            let Some(primitive) = primitive_name(&param.ty) else {
-                continue;
-            };
-            let name = match &param.pat.kind {
-                ast::PatKind::Ident(_, ident, _) => ident.name.to_string(),
-                _ => "_".to_string(),
-            };
-            cx.opt_span_lint(RAW_PRIMITIVE_PARAM, Some(param.span), |diag| {
-                diag.primary_message(format!(
-                    "param `{name}` uses raw primitive `{primitive}` — wrap it in a newtype"
-                ));
+        fn_box
+            .sig
+            .decl
+            .inputs
+            .iter()
+            .filter(|param| !param.span.from_expansion() && !param.is_self())
+            .filter_map(|param| {
+                let primitive = primitive_name(&param.ty)?;
+                let name = match &param.pat.kind {
+                    ast::PatKind::Ident(_, ident, _) => ident.name.to_string(),
+                    _ => "_".to_string(),
+                };
+                Some((name, primitive, param.span))
+            })
+            .for_each(|(name, primitive, span)| {
+                early_context.opt_span_lint(RAW_PRIMITIVE_PARAM, Some(span), |diag| {
+                    diag.primary_message(format!(
+                        "param `{name}` uses raw primitive `{primitive}` — wrap it in a newtype"
+                    ));
+                });
             });
-        }
     }
 }

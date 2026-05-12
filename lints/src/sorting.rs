@@ -3,32 +3,36 @@ use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
 use rustc_session::{declare_lint, impl_lint_pass};
 use rustc_span::Span;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Returns `Some((index, prev_name, curr_name))` for the first pair of
 /// adjacent names that are out of alphabetical order.
 fn first_unsorted(names: &[String]) -> Option<(usize, String, String)> {
-    names.windows(2).enumerate().find_map(|(i, w)| {
-        if w[0] > w[1] {
-            Some((i + 1, w[0].clone(), w[1].clone()))
-        } else {
-            None
-        }
-    })
+    names
+        .windows(2)
+        .enumerate()
+        .find_map(|(i, w)| match w[0] > w[1] {
+            false => None,
+            true => Some((i + 1, w[0].clone(), w[1].clone())),
+        })
 }
 
-/// Emit a lint diagnostic at the given span.
-fn emit_lint(cx: &EarlyContext<'_>, lint: &'static rustc_lint::Lint, span: Span, msg: String) {
-    cx.opt_span_lint(lint, Some(span), |diag| {
+struct LintEmission<'a> {
+    early_context: &'a EarlyContext<'a>,
+    lint: &'static rustc_lint::Lint,
+    msg: String,
+    span: Span,
+}
+
+fn emit_lint(lint_emission: LintEmission<'_>) {
+    let LintEmission {
+        early_context,
+        lint,
+        msg,
+        span,
+    } = lint_emission;
+    early_context.opt_span_lint(lint, Some(span), |diag| {
         diag.primary_message(msg);
     });
 }
-
-// ---------------------------------------------------------------------------
-// 1. UNSORTED_STRUCT_FIELDS
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Deny** — struct fields must be in alphabetical order.
@@ -41,35 +45,30 @@ pub struct UnsortedStructFields;
 impl_lint_pass!(UnsortedStructFields => [UNSORTED_STRUCT_FIELDS]);
 
 impl EarlyLintPass for UnsortedStructFields {
-    fn check_item(&mut self, cx: &EarlyContext<'_>, item: &ast::Item) {
-        // ItemKind::Struct is Struct(Ident, Generics, VariantData)
+    fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
         if let ast::ItemKind::Struct(_, _, ref vdata) = item.kind {
             let fields = vdata.fields();
             let names: Vec<String> = fields
                 .iter()
                 .filter_map(|f| f.ident.map(|id| id.name.to_string()))
                 .collect();
-            // Only check structs where every field is named (skip tuple structs)
+            // NOTE: skip tuple structs — those don't have named fields to sort.
             if names.len() != fields.len() || names.len() < 2 {
                 return;
             }
             if let Some((idx, prev, curr)) = first_unsorted(&names) {
-                emit_lint(
-                    cx,
-                    UNSORTED_STRUCT_FIELDS,
-                    fields[idx].span,
-                    format!(
+                emit_lint(LintEmission {
+                    early_context,
+                    lint: UNSORTED_STRUCT_FIELDS,
+                    msg: format!(
                         "struct field `{curr}` should come before `{prev}` (alphabetical order required)"
                     ),
-                );
+                    span: fields[idx].span,
+                });
             }
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 2. UNSORTED_ENUM_VARIANTS
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Deny** — enum variants must be in alphabetical order.
@@ -82,8 +81,7 @@ pub struct UnsortedEnumVariants;
 impl_lint_pass!(UnsortedEnumVariants => [UNSORTED_ENUM_VARIANTS]);
 
 impl EarlyLintPass for UnsortedEnumVariants {
-    fn check_item(&mut self, cx: &EarlyContext<'_>, item: &ast::Item) {
-        // ItemKind::Enum is Enum(Ident, Generics, EnumDef)
+    fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
         if let ast::ItemKind::Enum(_, _, ref enum_def) = item.kind {
             let names: Vec<String> = enum_def
                 .variants
@@ -94,22 +92,18 @@ impl EarlyLintPass for UnsortedEnumVariants {
                 return;
             }
             if let Some((idx, prev, curr)) = first_unsorted(&names) {
-                emit_lint(
-                    cx,
-                    UNSORTED_ENUM_VARIANTS,
-                    enum_def.variants[idx].span,
-                    format!(
+                emit_lint(LintEmission {
+                    early_context,
+                    lint: UNSORTED_ENUM_VARIANTS,
+                    msg: format!(
                         "enum variant `{curr}` should come before `{prev}` (alphabetical order required)"
                     ),
-                );
+                    span: enum_def.variants[idx].span,
+                });
             }
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 3. UNSORTED_MATCH_ARMS
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Deny** — match arms must be sorted by pattern text. Wildcard `_` must
@@ -123,7 +117,7 @@ pub struct UnsortedMatchArms;
 impl_lint_pass!(UnsortedMatchArms => [UNSORTED_MATCH_ARMS]);
 
 impl EarlyLintPass for UnsortedMatchArms {
-    fn check_expr(&mut self, cx: &EarlyContext<'_>, expr: &ast::Expr) {
+    fn check_expr(&mut self, early_context: &EarlyContext<'_>, expr: &ast::Expr) {
         if expr.span.from_expansion() {
             return;
         }
@@ -132,58 +126,50 @@ impl EarlyLintPass for UnsortedMatchArms {
                 return;
             }
 
-            let source_map = cx.sess().source_map();
+            let source_map = early_context.sess().source_map();
 
-            // Collect (pattern_text, is_wildcard, span) for each arm.
-            let mut arm_keys: Vec<(String, bool, Span)> = Vec::new();
-            for arm in arms.iter() {
-                let is_wild = matches!(arm.pat.kind, ast::PatKind::Wild);
-                let snippet = source_map
-                    .span_to_snippet(arm.pat.span)
-                    .unwrap_or_else(|_| "_".into());
-                arm_keys.push((snippet, is_wild, arm.pat.span));
+            let arm_keys: Vec<(String, bool, Span)> = arms
+                .iter()
+                .map(|arm| {
+                    let is_wild = matches!(arm.pat.kind, ast::PatKind::Wild);
+                    let snippet = source_map
+                        .span_to_snippet(arm.pat.span)
+                        .unwrap_or_else(|_| "_".into());
+                    (snippet, is_wild, arm.pat.span)
+                })
+                .collect();
+
+            let first_wild_pos = arm_keys.iter().position(|(_, w, _)| *w);
+            let arm_after_wild =
+                first_wild_pos.and_then(|pos| arm_keys.iter().skip(pos + 1).find(|(_, w, _)| !*w));
+            if let Some((snippet, _, span)) = arm_after_wild {
+                emit_lint(LintEmission {
+                    early_context,
+                    lint: UNSORTED_MATCH_ARMS,
+                    msg: format!(
+                        "match arm `{snippet}` appears after wildcard `_`; wildcard must be last"
+                    ),
+                    span: *span,
+                });
+                return;
             }
 
-            // 1. Wildcards must be last.
-            let mut seen_wild = false;
-            for (snippet, is_wild, span) in &arm_keys {
-                if seen_wild && !is_wild {
-                    emit_lint(
-                        cx,
-                        UNSORTED_MATCH_ARMS,
-                        *span,
-                        format!(
-                            "match arm `{snippet}` appears after wildcard `_`; wildcard must be last"
-                        ),
-                    );
-                    return;
-                }
-                if *is_wild {
-                    seen_wild = true;
-                }
-            }
-
-            // 2. Non-wildcard arms must be alphabetically sorted.
             let non_wild: Vec<&(String, bool, Span)> =
                 arm_keys.iter().filter(|(_, w, _)| !w).collect();
             let names: Vec<String> = non_wild.iter().map(|(s, _, _)| s.clone()).collect();
             if let Some((idx, prev, curr)) = first_unsorted(&names) {
-                emit_lint(
-                    cx,
-                    UNSORTED_MATCH_ARMS,
-                    non_wild[idx].2,
-                    format!(
+                emit_lint(LintEmission {
+                    early_context,
+                    lint: UNSORTED_MATCH_ARMS,
+                    msg: format!(
                         "match arm `{curr}` should come before `{prev}` (alphabetical order required)"
                     ),
-                );
+                    span: non_wild[idx].2,
+                });
             }
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 4. MOD_AFTER_USE
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Deny** — every `mod` declaration in a module must appear before any
@@ -198,46 +184,42 @@ pub struct ModAfterUse;
 impl_lint_pass!(ModAfterUse => [MOD_AFTER_USE]);
 
 fn check_mod_after_use<T: std::ops::Deref<Target = ast::Item>>(
-    cx: &EarlyContext<'_>,
+    early_context: &EarlyContext<'_>,
     items: &[T],
 ) {
-    let mut seen_use = false;
-    for item in items.iter() {
-        if item.span.from_expansion() {
-            continue;
-        }
-        match item.kind {
+    items
+        .iter()
+        .filter(|item| !item.span.from_expansion())
+        .scan(false, |seen_use, item| match item.kind {
+            ast::ItemKind::Mod(..) if *seen_use => Some(Some(item.span)),
             ast::ItemKind::Use(_) => {
-                seen_use = true;
-            }
-            ast::ItemKind::Mod(..) if seen_use => {
-                emit_lint(
-                    cx,
-                    MOD_AFTER_USE,
-                    item.span,
-                    "`mod` declaration must come before any `use` statement".to_string(),
-                );
-            }
-            _ => {}
-        }
-    }
+                *seen_use = true;
+                Some(None)
+            },
+            _ => Some(None),
+        })
+        .flatten()
+        .for_each(|span| {
+            emit_lint(LintEmission {
+                early_context,
+                lint: MOD_AFTER_USE,
+                msg: "`mod` declaration must come before any `use` statement".to_string(),
+                span,
+            });
+        });
 }
 
 impl EarlyLintPass for ModAfterUse {
-    fn check_crate(&mut self, cx: &EarlyContext<'_>, krate: &ast::Crate) {
-        check_mod_after_use(cx, &krate.items);
+    fn check_crate(&mut self, early_context: &EarlyContext<'_>, crate_root: &ast::Crate) {
+        check_mod_after_use(early_context, &crate_root.items);
     }
 
-    fn check_item(&mut self, cx: &EarlyContext<'_>, item: &ast::Item) {
+    fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
         if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref items, ..)) = item.kind {
-            check_mod_after_use(cx, items);
+            check_mod_after_use(early_context, items);
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 5. UNSORTED_IMPL_METHODS
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Deny** — methods within an `impl` block must be grouped as
@@ -251,7 +233,12 @@ declare_lint! {
 pub struct UnsortedImplMethods;
 impl_lint_pass!(UnsortedImplMethods => [UNSORTED_IMPL_METHODS]);
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+// WHY: the variant order encodes the precedence used by derived `Ord` at line
+// `if curr_group < prev_group` — Static must be the smallest discriminant,
+// Private the largest. Alphabetising the variants would invert that ordering
+// and silently break the lint's logic.
+#[allow(unsorted_enum_variants)]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 enum MethodGroup {
     Static = 0,
     Public = 1,
@@ -261,46 +248,39 @@ enum MethodGroup {
 impl MethodGroup {
     fn label(self) -> &'static str {
         match self {
-            MethodGroup::Static => "static",
-            MethodGroup::Public => "public",
             MethodGroup::Private => "private",
+            MethodGroup::Public => "public",
+            MethodGroup::Static => "static",
         }
     }
 }
 
-fn classify_fn(fn_box: &ast::Fn, vis: &ast::Visibility) -> MethodGroup {
-    let has_self = fn_box
-        .sig
-        .decl
-        .inputs
-        .first()
-        .is_some_and(|p| p.is_self());
-    if !has_self {
-        MethodGroup::Static
-    } else if matches!(
-        vis.kind,
+fn classify_fn(fn_box: &ast::Fn, visibility: &ast::Visibility) -> MethodGroup {
+    let has_self = fn_box.sig.decl.inputs.first().is_some_and(|p| p.is_self());
+    let is_public = matches!(
+        visibility.kind,
         ast::VisibilityKind::Public | ast::VisibilityKind::Restricted { .. }
-    ) {
-        MethodGroup::Public
-    } else {
-        MethodGroup::Private
+    );
+    match (has_self, is_public) {
+        (false, _) => MethodGroup::Static,
+        (true, false) => MethodGroup::Private,
+        (true, true) => MethodGroup::Public,
     }
 }
 
 impl EarlyLintPass for UnsortedImplMethods {
-    fn check_item(&mut self, cx: &EarlyContext<'_>, item: &ast::Item) {
+    fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
         if let ast::ItemKind::Impl(ref impl_block) = item.kind {
             let methods: Vec<(String, MethodGroup, Span)> = impl_block
                 .items
                 .iter()
-                .filter_map(|assoc| {
-                    if let ast::AssocItemKind::Fn(ref fn_box) = assoc.kind {
-                        let name = fn_box.ident.name.to_string();
-                        let group = classify_fn(fn_box, &assoc.vis);
-                        Some((name, group, assoc.span))
-                    } else {
-                        None
-                    }
+                .filter_map(|assoc| match assoc.kind {
+                    ast::AssocItemKind::Fn(ref fn_box) => Some((
+                        fn_box.ident.name.to_string(),
+                        classify_fn(fn_box, &assoc.vis),
+                        assoc.span,
+                    )),
+                    _ => None,
                 })
                 .collect();
 
@@ -308,51 +288,52 @@ impl EarlyLintPass for UnsortedImplMethods {
                 return;
             }
 
-            for w in methods.windows(2) {
+            let out_of_order = methods.windows(2).find(|w| w[1].1 < w[0].1);
+            if let Some(w) = out_of_order {
                 let (prev_name, prev_group, _) = &w[0];
                 let (curr_name, curr_group, curr_span) = &w[1];
-                if curr_group < prev_group {
-                    emit_lint(
-                        cx,
-                        UNSORTED_IMPL_METHODS,
-                        *curr_span,
-                        format!(
-                            "{} method `{curr_name}` must come before {} method `{prev_name}` (group order: static, public, private)",
-                            curr_group.label(),
-                            prev_group.label(),
-                        ),
-                    );
-                    return;
-                }
+                emit_lint(LintEmission {
+                    early_context,
+                    lint: UNSORTED_IMPL_METHODS,
+                    msg: format!(
+                        "{} method `{curr_name}` must come before {} method `{prev_name}` (group order: static, public, private)",
+                        curr_group.label(),
+                        prev_group.label(),
+                    ),
+                    span: *curr_span,
+                });
+                return;
             }
 
-            for group in [MethodGroup::Static, MethodGroup::Public, MethodGroup::Private] {
+            let unsorted_in_group = [
+                MethodGroup::Static,
+                MethodGroup::Public,
+                MethodGroup::Private,
+            ]
+            .into_iter()
+            .find_map(|group| {
                 let in_group: Vec<(String, Span)> = methods
                     .iter()
                     .filter(|(_, g, _)| *g == group)
                     .map(|(n, _, s)| (n.clone(), *s))
                     .collect();
                 let names: Vec<String> = in_group.iter().map(|(n, _)| n.clone()).collect();
-                if let Some((idx, prev, curr)) = first_unsorted(&names) {
-                    emit_lint(
-                        cx,
-                        UNSORTED_IMPL_METHODS,
-                        in_group[idx].1,
-                        format!(
-                            "{} method `{curr}` should come before `{prev}` (alphabetical within group)",
-                            group.label(),
-                        ),
-                    );
-                    return;
-                }
+                first_unsorted(&names).map(|(idx, prev, curr)| (group, in_group[idx].1, prev, curr))
+            });
+            if let Some((group, span, prev, curr)) = unsorted_in_group {
+                emit_lint(LintEmission {
+                    early_context,
+                    lint: UNSORTED_IMPL_METHODS,
+                    msg: format!(
+                        "{} method `{curr}` should come before `{prev}` (alphabetical within group)",
+                        group.label(),
+                    ),
+                    span,
+                });
             }
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// 6. UNSORTED_DERIVES
-// ---------------------------------------------------------------------------
 
 declare_lint! {
     /// **Deny** — `#[derive(...)]` attributes must list traits in alphabetical
@@ -373,9 +354,11 @@ fn is_local_source_path(path: &std::path::Path) -> bool {
         && !s.starts_with("<")
 }
 
-/// Find every `#[derive(...)]` attribute in `src` and return its
-/// `(open_bracket, close_bracket_inclusive_end)` byte range plus the
-/// inner traits list (raw, untrimmed) for sort-checking.
+// WHY: hand-rolled byte-level scan for `#[derive(...)]` attributes — a state
+// machine that tracks paren depth. Iterator combinators can't express the
+// stateful "advance to matching `)`" sweep without becoming strictly less
+// readable than the imperative form.
+#[allow(no_loop, no_if_else, raw_primitive_param)]
 fn find_derive_attrs(src: &str) -> Vec<(usize, usize, String)> {
     let bytes = src.as_bytes();
     let needle = b"#[derive(";
@@ -390,7 +373,7 @@ fn find_derive_attrs(src: &str) -> Vec<(usize, usize, String)> {
                 match bytes[j] {
                     b'(' => depth += 1,
                     b')' => depth -= 1,
-                    _ => {}
+                    _ => {},
                 }
                 j += 1;
             }
@@ -409,44 +392,44 @@ fn find_derive_attrs(src: &str) -> Vec<(usize, usize, String)> {
 }
 
 impl EarlyLintPass for UnsortedDerives {
-    fn check_crate(&mut self, cx: &EarlyContext<'_>, _krate: &ast::Crate) {
-        let source_map = cx.sess().source_map();
-        for file in source_map.files().iter() {
+    fn check_crate(&mut self, early_context: &EarlyContext<'_>, _krate: &ast::Crate) {
+        let source_map = early_context.sess().source_map();
+        source_map.files().iter().for_each(|file| {
             let path = match &file.name {
                 rustc_span::FileName::Real(real) => real.local_path_if_available().to_path_buf(),
-                _ => continue,
+                _ => return,
             };
             if !is_local_source_path(&path) {
-                continue;
+                return;
             }
             let Some(src) = file.src.as_ref() else {
-                continue;
+                return;
             };
             let base = file.start_pos;
-            for (lo, hi, inner) in find_derive_attrs(src) {
+            find_derive_attrs(src).into_iter().for_each(|(lo, hi, inner)| {
                 let names: Vec<String> = inner
                     .split(',')
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
                 if names.len() < 2 {
-                    continue;
+                    return;
                 }
                 if let Some((_idx, prev, curr)) = first_unsorted(&names) {
                     let span = Span::with_root_ctxt(
                         base + rustc_span::BytePos(lo as u32),
                         base + rustc_span::BytePos(hi as u32),
                     );
-                    emit_lint(
-                        cx,
-                        UNSORTED_DERIVES,
-                        span,
-                        format!(
+                    emit_lint(LintEmission {
+                        early_context,
+                        lint: UNSORTED_DERIVES,
+                        msg: format!(
                             "derive trait `{curr}` should come before `{prev}` (alphabetical order required)"
                         ),
-                    );
+                        span,
+                    });
                 }
-            }
-        }
+            });
+        });
     }
 }

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Run `cargo oneway` against both crates before allowing a push.
+# Enable with: git config core.hooksPath .githooks
+set -euo pipefail
+
+if ! command -v cargo-oneway >/dev/null 2>&1; then
+    echo "pre-push: cargo-oneway not found on PATH." >&2
+    echo "         install with: cargo install cargo-oneway" >&2
+    echo "         (or skip this push with --no-verify)" >&2
+    exit 1
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+export ONEWAY_LINTS_PATH="$repo_root/lints"
+
+status=0
+for crate in cli lints; do
+    echo "pre-push: cargo oneway in $crate/"
+    if ! (cd "$repo_root/$crate" && cargo oneway); then
+        status=1
+    fi
+done
+
+if [ "$status" -ne 0 ]; then
+    echo "" >&2
+    echo "pre-push: cargo oneway failed — fix the issues above or push with --no-verify." >&2
+fi
+exit "$status"

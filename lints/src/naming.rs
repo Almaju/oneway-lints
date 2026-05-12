@@ -15,22 +15,27 @@ declare_lint! {
 pub struct TypeDerivedNaming;
 impl_lint_pass!(TypeDerivedNaming => [TYPE_DERIVED_NAMING]);
 
+#[allow(raw_primitive_param)]
 fn snake_case(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 4);
-    let mut prev_lower = false;
-    for c in s.chars() {
-        if c.is_ascii_uppercase() {
-            if prev_lower {
-                out.push('_');
-            }
-            out.extend(c.to_lowercase());
-            prev_lower = false;
-        } else {
-            out.push(c);
-            prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
-        }
-    }
-    out
+    s.chars()
+        .fold(
+            (String::with_capacity(s.len() + 4), false),
+            |(mut out, prev_lower), c| match c.is_ascii_uppercase() {
+                false => {
+                    out.push(c);
+                    let new_prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
+                    (out, new_prev_lower)
+                },
+                true => {
+                    if prev_lower {
+                        out.push('_');
+                    }
+                    out.extend(c.to_lowercase());
+                    (out, false)
+                },
+            },
+        )
+        .0
 }
 
 fn extract_type_simple_name(ty: &ast::Ty) -> Option<String> {
@@ -41,6 +46,7 @@ fn extract_type_simple_name(ty: &ast::Ty) -> Option<String> {
     }
 }
 
+#[allow(raw_primitive_param)]
 fn is_primitive_type_name(name: &str) -> bool {
     matches!(
         name,
@@ -65,6 +71,7 @@ fn is_primitive_type_name(name: &str) -> bool {
     )
 }
 
+#[allow(raw_primitive_param)]
 fn is_stdlib_container(name: &str) -> bool {
     matches!(
         name,
@@ -89,7 +96,20 @@ fn is_stdlib_container(name: &str) -> bool {
     )
 }
 
-fn check_name(cx: &EarlyContext<'_>, binding_name: &str, ty: &ast::Ty, span: Span) {
+struct NameCheck<'a> {
+    binding_name: &'a str,
+    early_context: &'a EarlyContext<'a>,
+    span: Span,
+    ty: &'a ast::Ty,
+}
+
+fn check_name(name_check: NameCheck<'_>) {
+    let NameCheck {
+        binding_name,
+        early_context,
+        span,
+        ty,
+    } = name_check;
     if binding_name.starts_with('_') {
         return;
     }
@@ -108,7 +128,7 @@ fn check_name(cx: &EarlyContext<'_>, binding_name: &str, ty: &ast::Ty, span: Spa
     {
         return;
     }
-    cx.opt_span_lint(TYPE_DERIVED_NAMING, Some(span), |diag| {
+    early_context.opt_span_lint(TYPE_DERIVED_NAMING, Some(span), |diag| {
         diag.primary_message(format!(
             "binding `{binding_name}` should be named `{expected}` (or `<prefix>_{expected}` / `{expected}_<suffix>`) to match type `{type_name}`"
         ));
@@ -116,17 +136,7 @@ fn check_name(cx: &EarlyContext<'_>, binding_name: &str, ty: &ast::Ty, span: Spa
 }
 
 impl EarlyLintPass for TypeDerivedNaming {
-    fn check_param(&mut self, cx: &EarlyContext<'_>, param: &ast::Param) {
-        if param.span.from_expansion() || param.is_self() {
-            return;
-        }
-        let ast::PatKind::Ident(_, ident, _) = &param.pat.kind else {
-            return;
-        };
-        check_name(cx, ident.name.as_str(), &param.ty, param.pat.span);
-    }
-
-    fn check_local(&mut self, cx: &EarlyContext<'_>, local: &ast::Local) {
+    fn check_local(&mut self, early_context: &EarlyContext<'_>, local: &ast::Local) {
         if local.span.from_expansion() {
             return;
         }
@@ -136,6 +146,26 @@ impl EarlyLintPass for TypeDerivedNaming {
         let ast::PatKind::Ident(_, ident, _) = &local.pat.kind else {
             return;
         };
-        check_name(cx, ident.name.as_str(), ty, local.pat.span);
+        check_name(NameCheck {
+            binding_name: ident.name.as_str(),
+            early_context,
+            span: local.pat.span,
+            ty,
+        });
+    }
+
+    fn check_param(&mut self, early_context: &EarlyContext<'_>, param: &ast::Param) {
+        if param.span.from_expansion() || param.is_self() {
+            return;
+        }
+        let ast::PatKind::Ident(_, ident, _) = &param.pat.kind else {
+            return;
+        };
+        check_name(NameCheck {
+            binding_name: ident.name.as_str(),
+            early_context,
+            span: param.pat.span,
+            ty: &param.ty,
+        });
     }
 }
