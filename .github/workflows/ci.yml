@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  cli:
+    name: cli (stable)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+      - run: cargo build --locked
+      - run: cargo test --locked
+
+  lints:
+    name: lints (pinned nightly)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lints
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned nightly toolchain
+        # The toolchain channel + components are read from lints/rust-toolchain.toml.
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lints
+      - run: cargo build --locked
+      - run: cargo test --locked

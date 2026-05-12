@@ -1,0 +1,21 @@
+[package]
+name = "oneway-lints"
+version = "0.1.0"
+edition = "2021"
+description = "Opinionated dylint library implementing the Oneway philosophy for Rust"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Almaju/oneway-lints"
+readme = "README.md"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dylint_linting = "3.3"
+
+[dev-dependencies]
+dylint_testing = "3.3"
+
+[package.metadata.rust-analyzer]
+rustc_private = true

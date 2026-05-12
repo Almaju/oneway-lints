@@ -1,0 +1,17 @@
+[package]
+name = "cargo-oneway"
+version = "0.1.0"
+edition = "2021"
+description = "One-command runner: rustfmt + clippy + oneway-lints (via dylint), with the Oneway lint set baked in"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Almaju/oneway-lints"
+readme = "README.md"
+keywords = ["lint", "clippy", "dylint", "rustfmt", "style"]
+categories = ["development-tools", "command-line-utilities"]
+
+[[bin]]
+name = "cargo-oneway"
+path = "src/main.rs"
+
+[dependencies]
+toml = { version = "0.8", default-features = false, features = ["parse"] }
