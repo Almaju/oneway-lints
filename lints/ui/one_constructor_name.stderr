@@ -1,12 +1,21 @@
 error: static method `create` should come before `new` (alphabetical within group)
-  --> $DIR/one_constructor_name.rs:7:5
+  --> $DIR/one_constructor_name.rs:4:5
    |
-LL | /     pub fn create() -> Self {
+LL | /     pub fn new() -> Self {
 LL | |         Self
 LL | |     }
    | |_____^
    |
    = note: `#[deny(unsorted_impl_methods)]` on by default
+help: sort the impl methods (static → public → private, alphabetical within each group)
+   |
+LL ~     pub fn create() -> Self {
+LL +         Self
+LL +     }
+LL ~     pub fn new() -> Self {
+LL +         Self
+LL +     }
+   |
 
 error: constructor `create` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
   --> $DIR/one_constructor_name.rs:7:5

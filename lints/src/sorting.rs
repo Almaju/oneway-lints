@@ -218,6 +218,16 @@ declare_lint! {
 pub struct UnsortedMatchArms;
 impl_lint_pass!(UnsortedMatchArms => [UNSORTED_MATCH_ARMS]);
 
+fn arm_full_span(arm: &ast::Arm) -> Span {
+    let attr_lo = arm
+        .attrs
+        .iter()
+        .map(|a| a.span.lo())
+        .min()
+        .unwrap_or(arm.span.lo());
+    arm.span.with_lo(attr_lo)
+}
+
 impl EarlyLintPass for UnsortedMatchArms {
     fn check_expr(&mut self, early_context: &EarlyContext<'_>, expr: &ast::Expr) {
         if expr.span.from_expansion() {
@@ -245,6 +255,9 @@ impl EarlyLintPass for UnsortedMatchArms {
             let arm_after_wild =
                 first_wild_pos.and_then(|pos| arm_keys.iter().skip(pos + 1).find(|(_, w, _)| !*w));
             if let Some((snippet, _, span)) = arm_after_wild {
+                // WHY: no autofix — moving the wildcard arm could collapse
+                // multiple wildcard-like arms or change matching priority for
+                // arms with overlapping patterns. Author's call.
                 emit_lint(LintEmission {
                     early_context,
                     lint: UNSORTED_MATCH_ARMS,
@@ -260,13 +273,48 @@ impl EarlyLintPass for UnsortedMatchArms {
                 arm_keys.iter().filter(|(_, w, _)| !w).collect();
             let names: Vec<String> = non_wild.iter().map(|(s, _, _)| s.clone()).collect();
             if let Some((idx, prev, curr)) = first_unsorted(&names) {
-                emit_lint(LintEmission {
-                    early_context,
-                    lint: UNSORTED_MATCH_ARMS,
-                    msg: Msg(format!(
-                        "match arm `{curr}` should come before `{prev}` (alphabetical order required)"
-                    )),
-                    span: non_wild[idx].2,
+                let span = non_wild[idx].2;
+                let msg = format!(
+                    "match arm `{curr}` should come before `{prev}` (alphabetical order required)"
+                );
+                // WHY: skip autofix when any arm has a guard — guards can
+                // overlap with later patterns, so swapping arm order could
+                // change which arm matches.
+                let has_guard = arms.iter().any(|a| a.guard.is_some());
+                if has_guard {
+                    emit_lint(LintEmission {
+                        early_context,
+                        lint: UNSORTED_MATCH_ARMS,
+                        msg: Msg(msg),
+                        span,
+                    });
+                    return;
+                }
+                let full_spans: Vec<Span> = arms.iter().map(arm_full_span).collect();
+                let texts: Vec<String> = full_spans
+                    .iter()
+                    .map(|s| source_map.span_to_snippet(*s).unwrap_or_default())
+                    .collect();
+                let non_wild_positions: Vec<usize> = arms
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, a)| !matches!(a.pat.kind, ast::PatKind::Wild))
+                    .map(|(i, _)| i)
+                    .collect();
+                let mut sorted_positions = non_wild_positions.clone();
+                sorted_positions.sort_by(|&i, &j| arm_keys[i].0.cmp(&arm_keys[j].0));
+                let parts: Vec<(Span, String)> = non_wild_positions
+                    .iter()
+                    .zip(&sorted_positions)
+                    .map(|(&dest, &src)| (full_spans[dest], texts[src].clone()))
+                    .collect();
+                early_context.opt_span_lint(UNSORTED_MATCH_ARMS, Some(span), |diag| {
+                    diag.primary_message(msg);
+                    diag.multipart_suggestion(
+                        "sort the match arms alphabetically",
+                        parts,
+                        Applicability::MachineApplicable,
+                    );
                 });
             }
         }
@@ -289,26 +337,69 @@ fn check_mod_after_use<T: std::ops::Deref<Target = ast::Item>>(
     early_context: &EarlyContext<'_>,
     items: &[T],
 ) {
-    items
+    let mod_use_indices: Vec<usize> = items
         .iter()
-        .filter(|item| !item.span.from_expansion())
-        .scan(false, |seen_use, item| match item.kind {
-            ast::ItemKind::Mod(..) if *seen_use => Some(Some(item.span)),
-            ast::ItemKind::Use(_) => {
-                *seen_use = true;
-                Some(None)
-            },
-            _ => Some(None),
+        .enumerate()
+        .filter(|(_, item)| !item.span.from_expansion())
+        .filter(|(_, item)| matches!(item.kind, ast::ItemKind::Mod(..) | ast::ItemKind::Use(_)))
+        .map(|(i, _)| i)
+        .collect();
+
+    let first_misplaced = mod_use_indices.iter().enumerate().find(|(seq_idx, &i)| {
+        if !matches!(items[i].kind, ast::ItemKind::Mod(..)) {
+            return false;
+        }
+        mod_use_indices[..*seq_idx]
+            .iter()
+            .any(|&j| matches!(items[j].kind, ast::ItemKind::Use(_)))
+    });
+    let Some((_, &first_misplaced_index)) = first_misplaced else {
+        return;
+    };
+
+    let msg = "`mod` declaration must come before any `use` statement".to_string();
+    let span = items[first_misplaced_index].span;
+
+    let source_map = early_context.sess().source_map();
+    let texts: Vec<String> = mod_use_indices
+        .iter()
+        .map(|&i| {
+            source_map
+                .span_to_snippet(items[i].span)
+                .unwrap_or_default()
         })
-        .flatten()
-        .for_each(|span| {
-            emit_lint(LintEmission {
-                early_context,
-                lint: MOD_AFTER_USE,
-                msg: Msg("`mod` declaration must come before any `use` statement".to_string()),
-                span,
-            });
-        });
+        .collect();
+    let mods_first: Vec<usize> = mod_use_indices
+        .iter()
+        .copied()
+        .filter(|&i| matches!(items[i].kind, ast::ItemKind::Mod(..)))
+        .chain(
+            mod_use_indices
+                .iter()
+                .copied()
+                .filter(|&i| matches!(items[i].kind, ast::ItemKind::Use(_))),
+        )
+        .collect();
+    let parts: Vec<(Span, String)> = mod_use_indices
+        .iter()
+        .zip(&mods_first)
+        .map(|(&dest_idx, &src_idx)| {
+            let src_pos = mod_use_indices
+                .iter()
+                .position(|&i| i == src_idx)
+                .unwrap_or(0);
+            (items[dest_idx].span, texts[src_pos].clone())
+        })
+        .collect();
+
+    early_context.opt_span_lint(MOD_AFTER_USE, Some(span), |diag| {
+        diag.primary_message(msg);
+        diag.multipart_suggestion(
+            "move all `mod` declarations before `use` statements",
+            parts,
+            Applicability::MachineApplicable,
+        );
+    });
 }
 
 impl EarlyLintPass for ModAfterUse {
@@ -370,69 +461,102 @@ fn classify_fn(fn_box: &ast::Fn, visibility: &ast::Visibility) -> MethodGroup {
     }
 }
 
+fn assoc_full_span(assoc_item: &ast::AssocItem) -> Span {
+    let attr_lo = assoc_item
+        .attrs
+        .iter()
+        .map(|a| a.span.lo())
+        .min()
+        .unwrap_or(assoc_item.span.lo());
+    assoc_item.span.with_lo(attr_lo)
+}
+
 impl EarlyLintPass for UnsortedImplMethods {
     fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
         if let ast::ItemKind::Impl(ref impl_block) = item.kind {
-            let methods: Vec<(String, MethodGroup, Span)> = impl_block
+            let method_positions: Vec<usize> = impl_block
                 .items
                 .iter()
-                .filter_map(|assoc| match assoc.kind {
-                    ast::AssocItemKind::Fn(ref fn_box) => Some((
-                        fn_box.ident.name.to_string(),
-                        classify_fn(fn_box, &assoc.vis),
-                        assoc.span,
-                    )),
+                .enumerate()
+                .filter_map(|(i, assoc)| match assoc.kind {
+                    ast::AssocItemKind::Fn(_) => Some(i),
                     _ => None,
                 })
                 .collect();
 
-            if methods.len() < 2 {
+            if method_positions.len() < 2 {
                 return;
             }
 
-            let out_of_order = methods.windows(2).find(|w| w[1].1 < w[0].1);
-            if let Some(w) = out_of_order {
-                let (prev_name, prev_group, _) = &w[0];
-                let (curr_name, curr_group, curr_span) = &w[1];
-                emit_lint(LintEmission {
-                    early_context,
-                    lint: UNSORTED_IMPL_METHODS,
-                    msg: Msg(format!(
-                        "{} method `{curr_name}` must come before {} method `{prev_name}` (group order: static, public, private)",
-                        curr_group.label(),
-                        prev_group.label(),
-                    )),
-                    span: *curr_span,
-                });
-                return;
-            }
+            let methods: Vec<(String, MethodGroup, Span)> = method_positions
+                .iter()
+                .filter_map(|&i| {
+                    let assoc = &impl_block.items[i];
+                    let ast::AssocItemKind::Fn(ref fn_box) = assoc.kind else {
+                        return None;
+                    };
+                    Some((
+                        fn_box.ident.name.to_string(),
+                        classify_fn(fn_box, &assoc.vis),
+                        assoc_full_span(assoc),
+                    ))
+                })
+                .collect();
 
-            let unsorted_in_group = [
-                MethodGroup::Static,
-                MethodGroup::Public,
-                MethodGroup::Private,
-            ]
-            .into_iter()
-            .find_map(|group| {
-                let in_group: Vec<(String, Span)> = methods
-                    .iter()
-                    .filter(|(_, g, _)| *g == group)
-                    .map(|(n, _, s)| (n.clone(), *s))
-                    .collect();
-                let names: Vec<String> = in_group.iter().map(|(n, _)| n.clone()).collect();
-                first_unsorted(&names).map(|(idx, prev, curr)| (group, in_group[idx].1, prev, curr))
+            let mut sorted_indices: Vec<usize> = (0..methods.len()).collect();
+            sorted_indices.sort_by(|&i, &j| {
+                (methods[i].1, &methods[i].0).cmp(&(methods[j].1, &methods[j].0))
             });
-            if let Some((group, span, prev, curr)) = unsorted_in_group {
-                emit_lint(LintEmission {
-                    early_context,
-                    lint: UNSORTED_IMPL_METHODS,
-                    msg: Msg(format!(
-                        "{} method `{curr}` should come before `{prev}` (alphabetical within group)",
-                        group.label(),
-                    )),
-                    span,
-                });
-            }
+
+            let first_diff = sorted_indices
+                .iter()
+                .enumerate()
+                .find(|(actual_idx, &sorted_idx)| *actual_idx != sorted_idx);
+            let Some((actual_idx, &sorted_idx)) = first_diff else {
+                return;
+            };
+
+            let actual = &methods[actual_idx];
+            let expected = &methods[sorted_idx];
+            let msg = match expected.1.cmp(&actual.1) {
+                std::cmp::Ordering::Equal => format!(
+                    "{} method `{}` should come before `{}` (alphabetical within group)",
+                    actual.1.label(),
+                    expected.0,
+                    actual.0,
+                ),
+                std::cmp::Ordering::Greater => format!(
+                    "{} method `{}` should come before `{}` (alphabetical within group)",
+                    actual.1.label(),
+                    expected.0,
+                    actual.0,
+                ),
+                std::cmp::Ordering::Less => format!(
+                    "{} method `{}` must come before {} method `{}` (group order: static, public, private)",
+                    expected.1.label(),
+                    expected.0,
+                    actual.1.label(),
+                    actual.0,
+                ),
+            };
+
+            let source_map = early_context.sess().source_map();
+            let texts: Vec<String> = methods
+                .iter()
+                .map(|(_, _, span)| source_map.span_to_snippet(*span).unwrap_or_default())
+                .collect();
+            let parts: Vec<(Span, String)> = (0..methods.len())
+                .map(|i| (methods[i].2, texts[sorted_indices[i]].clone()))
+                .collect();
+
+            early_context.opt_span_lint(UNSORTED_IMPL_METHODS, Some(actual.2), |diag| {
+                diag.primary_message(msg);
+                diag.multipart_suggestion(
+                    "sort the impl methods (static → public → private, alphabetical within each group)",
+                    parts,
+                    Applicability::MachineApplicable,
+                );
+            });
         }
     }
 }

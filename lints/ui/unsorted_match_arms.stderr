@@ -13,6 +13,11 @@ LL |         1 => "one",
    |         ^
    |
    = note: `#[deny(unsorted_match_arms)]` on by default
+help: sort the match arms alphabetically
+   |
+LL ~         1 => "one",
+LL ~         2 => "two",
+   |
 
 error: aborting due to 1 previous error; 1 warning emitted
 
