@@ -5,6 +5,12 @@ LL |     Blue,
    |     ^^^^
    |
    = note: `#[deny(unsorted_enum_variants)]` on by default
+help: sort the enum variants alphabetically
+   |
+LL ~     Blue,
+LL ~     Green,
+LL ~     Red,
+   |
 
 error: aborting due to 1 previous error
 

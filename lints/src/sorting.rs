@@ -138,17 +138,73 @@ impl EarlyLintPass for UnsortedEnumVariants {
                 return;
             }
             if let Some((idx, prev, curr)) = first_unsorted(&names) {
-                emit_lint(LintEmission {
-                    early_context,
-                    lint: UNSORTED_ENUM_VARIANTS,
-                    msg: Msg(format!(
-                        "enum variant `{curr}` should come before `{prev}` (alphabetical order required)"
-                    )),
-                    span: enum_def.variants[idx].span,
+                let span = enum_def.variants[idx].span;
+                let msg = format!(
+                    "enum variant `{curr}` should come before `{prev}` (alphabetical order required)"
+                );
+                // WHY: skip autofix when variant order is load-bearing —
+                // derived Ord/PartialOrd/Hash compare by declaration order,
+                // and explicit discriminants signal intent the rule shouldn't
+                // override. The diagnostic still fires so the author can
+                // decide whether to disable the rule or accept the change.
+                // WHY: `#[derive(...)]` attrs aren't in `item.attrs` at the
+                // EarlyLintPass stage — the macro machinery has already
+                // claimed them. Probe the source text immediately preceding
+                // the item to find leading derive attrs and check whether
+                // they include any of the order-sensitive traits.
+                let source_map = early_context.sess().source_map();
+                let probe_lo = rustc_span::BytePos(item.span.lo().0.saturating_sub(256));
+                let probe_text = source_map
+                    .span_to_snippet(item.span.with_lo(probe_lo))
+                    .unwrap_or_default();
+                let has_order_derive = probe_text.contains("#[derive")
+                    && probe_text
+                        .split(|c: char| !c.is_alphanumeric() && c != '_')
+                        .any(|tok| matches!(tok, "Hash" | "Ord" | "PartialOrd"));
+                let has_explicit_discriminant =
+                    enum_def.variants.iter().any(|v| v.disr_expr.is_some());
+                if has_order_derive || has_explicit_discriminant {
+                    emit_lint(LintEmission {
+                        early_context,
+                        lint: UNSORTED_ENUM_VARIANTS,
+                        msg: Msg(msg),
+                        span,
+                    });
+                    return;
+                }
+                let source_map = early_context.sess().source_map();
+                let full_spans: Vec<Span> =
+                    enum_def.variants.iter().map(variant_full_span).collect();
+                let texts: Vec<String> = full_spans
+                    .iter()
+                    .map(|s| source_map.span_to_snippet(*s).unwrap_or_default())
+                    .collect();
+                let mut indices: Vec<usize> = (0..enum_def.variants.len()).collect();
+                indices.sort_by(|&i, &j| names[i].cmp(&names[j]));
+                let parts: Vec<(Span, String)> = (0..enum_def.variants.len())
+                    .map(|i| (full_spans[i], texts[indices[i]].clone()))
+                    .collect();
+                early_context.opt_span_lint(UNSORTED_ENUM_VARIANTS, Some(span), |diag| {
+                    diag.primary_message(msg);
+                    diag.multipart_suggestion(
+                        "sort the enum variants alphabetically",
+                        parts,
+                        Applicability::MachineApplicable,
+                    );
                 });
             }
         }
     }
+}
+
+fn variant_full_span(variant: &ast::Variant) -> Span {
+    let attr_lo = variant
+        .attrs
+        .iter()
+        .map(|a| a.span.lo())
+        .min()
+        .unwrap_or(variant.span.lo());
+    variant.span.with_lo(attr_lo)
 }
 
 declare_lint! {
