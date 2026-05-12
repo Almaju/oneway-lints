@@ -1,6 +1,6 @@
 [package]
 name = "cargo-oneway"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 description = "One-command runner: rustfmt + clippy + oneway-lints (via dylint), with the Oneway lint set baked in"
 license = "MIT OR Apache-2.0"
