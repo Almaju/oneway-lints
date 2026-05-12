@@ -43,10 +43,11 @@ jobs:
           new_version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           echo "version=$new_version" >> "$GITHUB_OUTPUT"
 
-      - name: Publish to crates.io
-        working-directory: cli
-        run: cargo publish --token "${{ secrets.CRATES_IO_TOKEN }}" --allow-dirty
-
+      # WHY: tag must exist on origin BEFORE the crates.io binary is
+      # available — the published CLI passes `--tag v{version}` to
+      # cargo dylint, so installing users would fail to fetch the lint
+      # library if the tag isn't pushed yet. Order is: commit → tag →
+      # push tag → push commit → publish.
       - name: Commit & tag
         env:
           VERSION: ${{ steps.bump.outputs.version }}
@@ -56,5 +57,9 @@ jobs:
           git add cli/Cargo.toml cli/Cargo.lock
           git commit -m "chore: release cargo-oneway v${VERSION}"
           git tag "v${VERSION}"
-          git push
           git push --tags
+          git push
+
+      - name: Publish to crates.io
+        working-directory: cli
+        run: cargo publish --token "${{ secrets.CRATES_IO_TOKEN }}"

@@ -17,6 +17,7 @@ cargo install cargo-oneway
 cargo oneway          # check formatting + clippy + oneway-lints
 cargo oneway fmt      # apply formatting
 cargo oneway lint     # lint only
+cargo oneway update   # reinstall the latest cargo-oneway from crates.io
 cargo oneway help
 ```
 
@@ -83,9 +84,11 @@ The hook uses your local `lints/` checkout (via `ONEWAY_LINTS_PATH`), so it lint
 
 ## Releases
 
-`cargo-oneway` ships on every push to `main`: the [release workflow](.github/workflows/release.yml) bumps the patch version, publishes to crates.io, and commits the bump back as `chore: release cargo-oneway vX.Y.Z`. No manual tagging required. Version inflation is the cost; reproducibility (pinned versions in users' `Cargo.lock`) is the benefit.
+`cargo-oneway` ships on every push to `main`: the [release workflow](.github/workflows/release.yml) bumps the patch version, commits + tags the bump, pushes the `vX.Y.Z` tag, then publishes to crates.io.
 
-The dylint library (`lints/`) is consumed via git (`cargo dylint --git ...`), so it doesn't have a release cadence — every push to `main` is immediately picked up by the next `cargo oneway` invocation that hits the dylint cache miss.
+**The CLI version pins the lint library.** Each published `cargo-oneway` binary embeds its own version and asks `cargo dylint` for the matching git tag (`--tag vX.Y.Z`). So `cargo install cargo-oneway --version 0.1.5` gives you exactly the rules that shipped with v0.1.5 — not whatever happens to be on `main` today. Updating the rules means updating the CLI (`cargo oneway update`).
+
+The dylint cache is keyed per-tag, so a CLI bump naturally invalidates the cache and triggers a rebuild on next run.
 
 ## License
 

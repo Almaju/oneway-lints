@@ -16,6 +16,7 @@ cargo oneway          # fmt --check + clippy + oneway-lints
 cargo oneway fmt      # apply formatting
 cargo oneway lint     # clippy + oneway-lints only
 cargo oneway --fix    # autofix what's autofixable
+cargo oneway update   # reinstall the latest cargo-oneway from crates.io
 cargo oneway help
 ```
 

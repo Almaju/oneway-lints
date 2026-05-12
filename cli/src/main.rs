@@ -193,9 +193,15 @@ fn run_dylint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
             command.arg("--path").arg(path);
         },
         _ => {
+            // WHY: pin to the git tag matching this CLI's version so the rules
+            // a user gets are deterministic from the `cargo install` they ran.
+            // Without the tag pin, dylint pulls upstream HEAD and the rules
+            // can change without a CLI update.
             command
                 .arg("--git")
                 .arg(DYLINT_GIT)
+                .arg("--tag")
+                .arg(concat!("v", env!("CARGO_PKG_VERSION")))
                 .arg("--pattern")
                 .arg(DYLINT_PATTERN);
         },
@@ -233,6 +239,12 @@ fn run_lint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
     Ok([clippy, dylint].into_iter().find(|&c| c != 0).unwrap_or(0))
 }
 
+fn run_update() -> io::Result<i32> {
+    let mut command = Command::new("cargo");
+    command.args(["install", "cargo-oneway", "--force", "--locked"]);
+    run(command)
+}
+
 fn run_all(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
     let fmt_mode = match lint_opts.fix_mode {
         FixMode::Off => FmtMode::Check,
@@ -257,6 +269,7 @@ USAGE:
 SUBCOMMANDS:
     fmt     Apply Oneway rustfmt config to the workspace
     lint    Run clippy + oneway-lints with the Oneway lint set
+    update  Reinstall the latest `cargo-oneway` from crates.io
     help    Print this message
 
 With no subcommand, runs `fmt --check`, clippy, and oneway-lints — failing
@@ -302,6 +315,7 @@ fn dispatch() -> io::Result<i32> {
         },
         Some("fmt") => run_fmt(passthrough, FmtMode::Apply),
         Some("lint") => run_lint(&lint_opts),
+        Some("update") => run_update(),
         Some(other) => {
             eprintln!("cargo-oneway: unknown subcommand `{other}` — try `cargo oneway help`");
             Ok(2)
