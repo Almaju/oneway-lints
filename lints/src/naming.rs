@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use rustc_ast::ast;
 use rustc_ast::visit::{self, FnKind, Visitor};
+use rustc_errors::Applicability;
 use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
 use rustc_session::{declare_lint, impl_lint_pass};
 use rustc_span::Span;
@@ -169,12 +170,77 @@ struct BindingName<'a>(&'a str);
 
 struct Binding<'a> {
     binding_name: BindingName<'a>,
+    rename_refs: Option<&'a [Span]>,
     span: Span,
     ty: &'a ast::Ty,
 }
 
+struct Rename<'a> {
+    decl_span: Span,
+    msg: String,
+    new_name: String,
+    refs: Option<&'a [Span]>,
+}
+
+struct FnContext {
+    pat_bindings: HashMap<String, usize>,
+    refs: HashMap<String, Vec<Span>>,
+}
+
+/// Collects single-segment Path expressions throughout a block — these are
+/// the "value reference" sites that need to be renamed alongside the binding.
+struct ReferenceCollector<'a> {
+    refs: &'a mut HashMap<String, Vec<Span>>,
+}
+
+impl<'ast> Visitor<'ast> for ReferenceCollector<'_> {
+    fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+        if let ast::ExprKind::Path(None, path) = &expr.kind {
+            if path.segments.len() == 1 {
+                let segment = &path.segments[0];
+                if segment.args.is_none() {
+                    let name = segment.ident.name.to_string();
+                    self.refs.entry(name).or_default().push(segment.ident.span);
+                }
+            }
+        }
+        visit::walk_expr(self, expr);
+    }
+}
+
+/// Counts how many times a name appears as a pattern binding inside a block.
+/// Used to skip autofix when a param name is shadowed by an inner `let`,
+/// `if let`, or match arm — renaming all refs would point past the shadow.
+struct PatBindingCounter<'a> {
+    counts: &'a mut HashMap<String, usize>,
+}
+
+impl<'ast> Visitor<'ast> for PatBindingCounter<'_> {
+    fn visit_pat(&mut self, pat: &'ast ast::Pat) {
+        if let ast::PatKind::Ident(_, ident, _) = &pat.kind {
+            *self.counts.entry(ident.name.to_string()).or_default() += 1;
+        }
+        visit::walk_pat(self, pat);
+    }
+}
+
+fn build_fn_context(block: &ast::Block) -> FnContext {
+    let mut refs = HashMap::new();
+    let mut collector = ReferenceCollector { refs: &mut refs };
+    visit::walk_block(&mut collector, block);
+
+    let mut pat_bindings = HashMap::new();
+    let mut counter = PatBindingCounter {
+        counts: &mut pat_bindings,
+    };
+    visit::walk_block(&mut counter, block);
+
+    FnContext { pat_bindings, refs }
+}
+
 struct NamingVisitor<'cx> {
     early_context: &'cx EarlyContext<'cx>,
+    fn_stack: Vec<FnContext>,
     scopes: Vec<HashMap<String, Vec<String>>>,
 }
 
@@ -182,6 +248,7 @@ impl NamingVisitor<'_> {
     fn check_binding(&self, binding: Binding<'_>) {
         let Binding {
             binding_name: BindingName(binding_name),
+            rename_refs,
             span,
             ty,
         } = binding;
@@ -205,15 +272,15 @@ impl NamingVisitor<'_> {
                     if matches_expected(binding_name, &expected) {
                         return;
                     }
-                    self.early_context.opt_span_lint(
-                        TYPE_DERIVED_NAMING,
-                        Some(span),
-                        |diag| {
-                            diag.primary_message(format!(
-                                "binding `{binding_name}` should be named `{expected}` (or `<prefix>_{expected}` / `{expected}_<suffix>`) to match its trait bound `{single_bound}`"
-                            ));
-                        },
+                    let msg = format!(
+                        "binding `{binding_name}` should be named `{expected}` (or `<prefix>_{expected}` / `{expected}_<suffix>`) to match its trait bound `{single_bound}`"
                     );
+                    self.emit_rename(Rename {
+                        decl_span: span,
+                        msg,
+                        new_name: expected,
+                        refs: rename_refs,
+                    });
                     return;
                 },
                 _ => {
@@ -234,15 +301,15 @@ impl NamingVisitor<'_> {
                     if matches_expected(binding_name, &expected) {
                         return;
                     }
-                    self.early_context.opt_span_lint(
-                        TYPE_DERIVED_NAMING,
-                        Some(span),
-                        |diag| {
-                            diag.primary_message(format!(
-                                "binding `{binding_name}` should be named `{expected}` (or `<prefix>_{expected}` / `{expected}_<suffix>`) to match generic `{type_name}`"
-                            ));
-                        },
+                    let msg = format!(
+                        "binding `{binding_name}` should be named `{expected}` (or `<prefix>_{expected}` / `{expected}_<suffix>`) to match generic `{type_name}`"
                     );
+                    self.emit_rename(Rename {
+                        decl_span: span,
+                        msg,
+                        new_name: expected,
+                        refs: rename_refs,
+                    });
                     return;
                 },
             }
@@ -255,11 +322,37 @@ impl NamingVisitor<'_> {
         if matches_expected(binding_name, &expected) {
             return;
         }
+        let msg = format!(
+            "binding `{binding_name}` should be named `{expected}` (or `<prefix>_{expected}` / `{expected}_<suffix>`) to match type `{type_name}`"
+        );
+        self.emit_rename(Rename {
+            decl_span: span,
+            msg,
+            new_name: expected,
+            refs: rename_refs,
+        });
+    }
+
+    fn emit_rename(&self, rename: Rename<'_>) {
+        let Rename {
+            decl_span,
+            msg,
+            new_name,
+            refs,
+        } = rename;
         self.early_context
-            .opt_span_lint(TYPE_DERIVED_NAMING, Some(span), |diag| {
-                diag.primary_message(format!(
-                    "binding `{binding_name}` should be named `{expected}` (or `<prefix>_{expected}` / `{expected}_<suffix>`) to match type `{type_name}`"
-                ));
+            .opt_span_lint(TYPE_DERIVED_NAMING, Some(decl_span), |diag| {
+                diag.primary_message(msg);
+                if let Some(refs) = refs {
+                    let mut parts: Vec<(Span, String)> = Vec::with_capacity(refs.len() + 1);
+                    parts.push((decl_span, new_name.clone()));
+                    refs.iter().for_each(|s| parts.push((*s, new_name.clone())));
+                    diag.multipart_suggestion(
+                        "rename the binding and all references",
+                        parts,
+                        Applicability::MachineApplicable,
+                    );
+                }
             });
     }
 
@@ -279,7 +372,15 @@ impl<'ast> Visitor<'ast> for NamingVisitor<'_> {
     ) {
         if let FnKind::Fn(_, _, fn_box) = fn_kind {
             self.scopes.push(generic_param_bounds(&fn_box.generics));
+            let body_context = fn_box.body.as_ref().map(|body| build_fn_context(body));
+            let pushed_fn = body_context.is_some();
+            if let Some(ctx) = body_context {
+                self.fn_stack.push(ctx);
+            }
             visit::walk_fn(self, fn_kind);
+            if pushed_fn {
+                self.fn_stack.pop();
+            }
             self.scopes.pop();
         } else {
             visit::walk_fn(self, fn_kind);
@@ -300,8 +401,13 @@ impl<'ast> Visitor<'ast> for NamingVisitor<'_> {
         if !local.span.from_expansion() {
             if let Some(ty) = &local.ty {
                 if let ast::PatKind::Ident(_, ident, _) = &local.pat.kind {
+                    // WHY: let-binding scope is the rest of the enclosing
+                    // block (until shadowed), which we don't track precisely.
+                    // Use fn-wide ref scope would over-rename across blocks;
+                    // safer to emit diagnostic without autofix.
                     self.check_binding(Binding {
                         binding_name: BindingName(ident.name.as_str()),
+                        rename_refs: None,
                         span: local.pat.span,
                         ty,
                     });
@@ -314,8 +420,20 @@ impl<'ast> Visitor<'ast> for NamingVisitor<'_> {
     fn visit_param(&mut self, param: &'ast ast::Param) {
         if !param.span.from_expansion() && !param.is_self() {
             if let ast::PatKind::Ident(_, ident, _) = &param.pat.kind {
+                let name = ident.name.as_str().to_string();
+                // WHY: skip autofix if the name is shadowed in the body
+                // by an inner `let`, `if let`, or match arm — those bring
+                // a new binding into scope and renaming all references
+                // would silently point past the shadow.
+                let rename_refs = self.fn_stack.last().and_then(|ctx| {
+                    match ctx.pat_bindings.get(&name).copied().unwrap_or(0) > 0 {
+                        false => ctx.refs.get(&name).map(Vec::as_slice),
+                        true => None,
+                    }
+                });
                 self.check_binding(Binding {
-                    binding_name: BindingName(ident.name.as_str()),
+                    binding_name: BindingName(&name),
+                    rename_refs,
                     span: param.pat.span,
                     ty: &param.ty,
                 });
@@ -329,6 +447,7 @@ impl EarlyLintPass for TypeDerivedNaming {
     fn check_crate(&mut self, early_context: &EarlyContext<'_>, crate_root: &ast::Crate) {
         let mut visitor = NamingVisitor {
             early_context,
+            fn_stack: Vec::new(),
             scopes: Vec::new(),
         };
         visit::walk_crate(&mut visitor, crate_root);

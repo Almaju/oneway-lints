@@ -5,12 +5,23 @@ LL | pub fn bad_param(id: UserId, db: Database) {
    |                  ^^
    |
    = note: `#[deny(type_derived_naming)]` on by default
+help: rename the binding and all references
+   |
+LL ~ pub fn bad_param(user_id: UserId, db: Database) {
+LL ~     let _ = (user_id, db);
+   |
 
 error: binding `db` should be named `database` (or `<prefix>_database` / `database_<suffix>`) to match type `Database`
   --> $DIR/type_derived_naming.rs:17:30
    |
 LL | pub fn bad_param(id: UserId, db: Database) {
    |                              ^^
+   |
+help: rename the binding and all references
+   |
+LL ~ pub fn bad_param(id: UserId, database: Database) {
+LL ~     let _ = (id, database);
+   |
 
 error: binding `id` should be named `user_id` (or `<prefix>_user_id` / `user_id_<suffix>`) to match type `UserId`
   --> $DIR/type_derived_naming.rs:23:9
@@ -23,6 +34,12 @@ error: binding `m` should be named `migrator` (or `<prefix>_migrator` / `migrato
    |
 LL | pub fn single_bound_bad<M: Migrator>(m: M) {
    |                                      ^
+   |
+help: rename the binding and all references
+   |
+LL ~ pub fn single_bound_bad<M: Migrator>(migrator: M) {
+LL ~     let _ = migrator;
+   |
 
 error: generic `M` has multiple trait bounds (`Migrator + Connector + Orchestrator`) — rename the generic to a descriptive identifier reflecting its role, then name `m` after it
   --> $DIR/type_derived_naming.rs:43:76
@@ -35,6 +52,12 @@ error: binding `thing` should be named `service` (or `<prefix>_service` / `servi
    |
 LL | pub fn multi_bound_binding_mismatch<Service: Migrator + Connector>(thing: Service) {
    |                                                                    ^^^^^
+   |
+help: rename the binding and all references
+   |
+LL ~ pub fn multi_bound_binding_mismatch<Service: Migrator + Connector>(service: Service) {
+LL ~     let _ = service;
+   |
 
 error: aborting due to 6 previous errors
 
