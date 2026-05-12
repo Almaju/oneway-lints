@@ -4,6 +4,10 @@ An opinionated lint suite for Rust. One command — `cargo oneway` — runs `rus
 
 The philosophy: **there is one way to do it**. Sorting is canonical, comments must justify themselves, raw primitives are wrapped, public methods don't compose other public methods, and so on.
 
+## Status
+
+Personal project, opinionated by design. Bus factor is 1 — every commit to `main` auto-publishes to crates.io, so version numbers churn and there's no review process. Shared in case it's useful; not seeking adopters or contributors. If you try it and have feedback, an issue is welcome.
+
 ## Quickstart
 
 ```sh
@@ -12,13 +16,16 @@ cargo install cargo-oneway
 cargo oneway
 ```
 
-The first `cargo oneway` invocation triggers `cargo dylint` to clone the lint library at the matching git tag and build it under the pinned nightly. Subsequent runs use the dylint cache.
+The first `cargo oneway` invocation pulls the pinned nightly toolchain + `rustc-dev` + `llvm-tools-preview` components (a few hundred MB) and builds the lint library at the matching git tag. Takes a few minutes; subsequent runs use the dylint cache.
+
+The dylint dependency means **nightly Rust is required** — there's no stable path that gives you AST access at the level these rules need.
 
 ## Documentation
 
 - [**`cli/README.md`**](cli/README.md) — how to use the CLI: every subcommand, flags, `oneway.toml`, environment, version coupling.
 - [**`lints/README.md`**](lints/README.md) — every rule, grouped by category, with severities and links to per-rule rationale + examples.
 - [**`lints/docs/`**](lints/docs/) — one Markdown page per rule with bad/good examples.
+- [**`CHANGELOG.md`**](CHANGELOG.md) — what changed in each version (the rules churn occasionally).
 
 ## Repository Layout
 
