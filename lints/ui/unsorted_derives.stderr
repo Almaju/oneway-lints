@@ -2,7 +2,7 @@ error: derive trait `Clone` should come before `Debug` (alphabetical order requi
   --> $DIR/unsorted_derives.rs:1:1
    |
 LL | #[derive(Debug, Clone)]
-   | ^^^^^^^^^^^^^^^^^^^^^^^
+   | ^^^^^^^^^^^^^^^^^^^^^^^ help: sort the derive list alphabetically: `#[derive(Clone, Debug)]`
    |
    = note: `#[deny(unsorted_derives)]` on by default
 

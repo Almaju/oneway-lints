@@ -1,4 +1,5 @@
 use rustc_ast::ast;
+use rustc_errors::Applicability;
 use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
 use rustc_session::{declare_lint, impl_lint_pass};
 use rustc_span::Span;
@@ -46,6 +47,22 @@ declare_lint! {
 pub struct UnsortedStructFields;
 impl_lint_pass!(UnsortedStructFields => [UNSORTED_STRUCT_FIELDS]);
 
+fn field_full_span(field_def: &ast::FieldDef) -> Span {
+    let attr_lo = field_def
+        .attrs
+        .iter()
+        .map(|a| a.span.lo())
+        .min()
+        .unwrap_or(field_def.span.lo());
+    field_def.span.with_lo(attr_lo)
+}
+
+fn has_repr_attr(attrs: &[ast::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|attr| attr.ident().is_some_and(|id| id.name.as_str() == "repr"))
+}
+
 impl EarlyLintPass for UnsortedStructFields {
     fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
         if let ast::ItemKind::Struct(_, _, ref vdata) = item.kind {
@@ -59,13 +76,40 @@ impl EarlyLintPass for UnsortedStructFields {
                 return;
             }
             if let Some((idx, prev, curr)) = first_unsorted(&names) {
-                emit_lint(LintEmission {
-                    early_context,
-                    lint: UNSORTED_STRUCT_FIELDS,
-                    msg: Msg(format!(
-                        "struct field `{curr}` should come before `{prev}` (alphabetical order required)"
-                    )),
-                    span: fields[idx].span,
+                let span = fields[idx].span;
+                let msg = format!(
+                    "struct field `{curr}` should come before `{prev}` (alphabetical order required)"
+                );
+                // WHY: skip autofix when `#[repr(...)]` is present — field
+                // order is load-bearing for FFI and packed layouts. We still
+                // emit the diagnostic so the author can decide.
+                if has_repr_attr(&item.attrs) {
+                    emit_lint(LintEmission {
+                        early_context,
+                        lint: UNSORTED_STRUCT_FIELDS,
+                        msg: Msg(msg),
+                        span,
+                    });
+                    return;
+                }
+                let source_map = early_context.sess().source_map();
+                let full_spans: Vec<Span> = fields.iter().map(field_full_span).collect();
+                let texts: Vec<String> = full_spans
+                    .iter()
+                    .map(|s| source_map.span_to_snippet(*s).unwrap_or_default())
+                    .collect();
+                let mut indices: Vec<usize> = (0..fields.len()).collect();
+                indices.sort_by(|&i, &j| names[i].cmp(&names[j]));
+                let parts: Vec<(Span, String)> = (0..fields.len())
+                    .map(|i| (full_spans[i], texts[indices[i]].clone()))
+                    .collect();
+                early_context.opt_span_lint(UNSORTED_STRUCT_FIELDS, Some(span), |diag| {
+                    diag.primary_message(msg);
+                    diag.multipart_suggestion(
+                        "sort the struct fields alphabetically",
+                        parts,
+                        Applicability::MachineApplicable,
+                    );
                 });
             }
         }
@@ -422,13 +466,19 @@ impl EarlyLintPass for UnsortedDerives {
                         base + rustc_span::BytePos(lo as u32),
                         base + rustc_span::BytePos(hi as u32),
                     );
-                    emit_lint(LintEmission {
-                        early_context,
-                        lint: UNSORTED_DERIVES,
-                        msg: Msg(format!(
+                    let mut sorted = names.clone();
+                    sorted.sort();
+                    let replacement = format!("#[derive({})]", sorted.join(", "));
+                    early_context.opt_span_lint(UNSORTED_DERIVES, Some(span), |diag| {
+                        diag.primary_message(format!(
                             "derive trait `{curr}` should come before `{prev}` (alphabetical order required)"
-                        )),
-                        span,
+                        ));
+                        diag.span_suggestion(
+                            span,
+                            "sort the derive list alphabetically",
+                            replacement,
+                            Applicability::MachineApplicable,
+                        );
                     });
                 }
             });

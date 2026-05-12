@@ -5,6 +5,12 @@ LL |     email: String,
    |     ^^^^^^^^^^^^^
    |
    = note: `#[deny(unsorted_struct_fields)]` on by default
+help: sort the struct fields alphabetically
+   |
+LL ~     age: u32,
+LL |     email: String,
+LL ~     name: String,
+   |
 
 warning: field `name` uses raw primitive `String` — wrap it in a newtype
   --> $DIR/unsorted_struct_fields.rs:2:11
