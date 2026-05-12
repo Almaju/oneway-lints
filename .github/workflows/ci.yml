@@ -35,5 +35,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: lints
+      - name: Install dylint-link
+        # Required because lints/.cargo/config.toml sets `linker = "dylint-link"`.
+        run: cargo install dylint-link --locked
       - run: cargo build --locked
       - run: cargo test --locked

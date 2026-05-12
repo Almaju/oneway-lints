@@ -12,7 +12,7 @@ jobs:
   release:
     # Skip the workflow's own version-bump commit so we don't infinite-loop
     # (the default GITHUB_TOKEN already prevents that, but this is explicit).
-    if: ${{ !startsWith(github.event.head_commit.message, 'chore: release') }}
+    if: "${{ !startsWith(github.event.head_commit.message, 'chore: release') }}"
     runs-on: ubuntu-latest
     permissions:
       contents: write
