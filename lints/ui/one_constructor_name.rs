@@ -25,9 +25,22 @@ impl WithRef {
     }
 }
 
+pub struct UserId(u64);
+
+impl UserId {
+    pub fn from_string() -> Self {
+        Self(0)
+    }
+    pub fn new() -> Self {
+        Self(0)
+    }
+}
+
 fn main() {
     let _ = Server::new();
     let _ = Server::create();
     let _ = Db::init();
     let _ = WithRef.allowed_method();
+    let _ = UserId::new();
+    let _ = UserId::from_string();
 }

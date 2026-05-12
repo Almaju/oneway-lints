@@ -58,3 +58,47 @@ let dst = AccountId(2);
 let sender_account_id = AccountId(1);
 let receiver_account_id = AccountId(2);
 ```
+
+## Generics
+
+For generic-typed parameters, the rule resolves the generic's bounds:
+
+- **No effective bounds** (filtering `Sized`, `?Sized`, `Send`, `Sync`, `Unpin`): no constraint — the generic carries no semantic info.
+- **One bound** (`<M: Migrator>`): binding must match the trait — `migrator: M`. The generic's spelling can stay short (`M`, `T`).
+- **Two or more bounds** (`<M: Migrator + Connector>`): the generic itself must be given a descriptive identifier reflecting its role (`Service`, `Worker`, …), and the binding must match it: `<Service: Migrator + Connector>(service: Service)`.
+
+### ❌ Bad — single-letter binding for a bounded generic
+
+```rust
+fn run<M: Migrator>(m: M) {
+    m.migrate()
+}
+```
+
+### ✅ Good
+
+```rust
+fn run<M: Migrator>(migrator: M) {
+    migrator.migrate()
+}
+```
+
+### ❌ Bad — placeholder generic name with multiple bounds
+
+```rust
+fn deploy<M: Migrator + Connector + Orchestrator>(m: M) {
+    m.migrate()?;
+    m.connect()?;
+    m.orchestrate()
+}
+```
+
+### ✅ Good — name the generic by its role
+
+```rust
+fn deploy<Service: Migrator + Connector + Orchestrator>(service: Service) {
+    service.migrate()?;
+    service.connect()?;
+    service.orchestrate()
+}
+```

@@ -1,5 +1,5 @@
 error: binding `id` should be named `user_id` (or `<prefix>_user_id` / `user_id_<suffix>`) to match type `UserId`
-  --> $DIR/type_derived_naming.rs:13:18
+  --> $DIR/type_derived_naming.rs:17:18
    |
 LL | pub fn bad_param(id: UserId, db: Database) {
    |                  ^^
@@ -7,16 +7,34 @@ LL | pub fn bad_param(id: UserId, db: Database) {
    = note: `#[deny(type_derived_naming)]` on by default
 
 error: binding `db` should be named `database` (or `<prefix>_database` / `database_<suffix>`) to match type `Database`
-  --> $DIR/type_derived_naming.rs:13:30
+  --> $DIR/type_derived_naming.rs:17:30
    |
 LL | pub fn bad_param(id: UserId, db: Database) {
    |                              ^^
 
 error: binding `id` should be named `user_id` (or `<prefix>_user_id` / `user_id_<suffix>`) to match type `UserId`
-  --> $DIR/type_derived_naming.rs:19:9
+  --> $DIR/type_derived_naming.rs:23:9
    |
 LL |     let id: UserId = UserId(2);
    |         ^^
 
-error: aborting due to 3 previous errors
+error: binding `m` should be named `migrator` (or `<prefix>_migrator` / `migrator_<suffix>`) to match its trait bound `Migrator`
+  --> $DIR/type_derived_naming.rs:39:38
+   |
+LL | pub fn single_bound_bad<M: Migrator>(m: M) {
+   |                                      ^
+
+error: generic `M` has multiple trait bounds (`Migrator + Connector + Orchestrator`) — rename the generic to a descriptive identifier reflecting its role, then name `m` after it
+  --> $DIR/type_derived_naming.rs:43:76
+   |
+LL | pub fn multi_bound_placeholder_bad<M: Migrator + Connector + Orchestrator>(m: M) {
+   |                                                                            ^
+
+error: binding `thing` should be named `service` (or `<prefix>_service` / `service_<suffix>`) to match generic `Service`
+  --> $DIR/type_derived_naming.rs:51:68
+   |
+LL | pub fn multi_bound_binding_mismatch<Service: Migrator + Connector>(thing: Service) {
+   |                                                                    ^^^^^
+
+error: aborting due to 6 previous errors
 

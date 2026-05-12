@@ -8,7 +8,7 @@ LL | |     }
    |
    = note: `#[deny(unsorted_impl_methods)]` on by default
 
-error: constructor `create` must be named `new` (returns `Self`, no `self` receiver)
+error: constructor `create` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
   --> $DIR/one_constructor_name.rs:7:5
    |
 LL | /     pub fn create() -> Self {
@@ -18,7 +18,7 @@ LL | |     }
    |
    = note: `#[deny(one_constructor_name)]` on by default
 
-error: constructor `init` must be named `new` (returns `Self`, no `self` receiver)
+error: constructor `init` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
   --> $DIR/one_constructor_name.rs:15:5
    |
 LL | /     pub fn init() -> Self {

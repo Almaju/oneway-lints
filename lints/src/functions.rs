@@ -49,14 +49,19 @@ impl EarlyLintPass for NoNestedFunctions {
 }
 
 declare_lint! {
-    /// **Deny** — constructors must be named `new`.
+    /// **Deny** — constructors must not use near-synonyms for `new` such as
+    /// `create`, `build`, `init`, `make`, or `construct`. Other descriptive
+    /// constructor names (`from_string`, `with_capacity`, role-discriminating
+    /// names like `user`/`system`/`assistant`, etc.) are allowed.
     pub ONE_CONSTRUCTOR_NAME,
     Deny,
-    "constructors must be named `new`"
+    "constructors must not use the synonyms `create`/`build`/`init`/`make`/`construct` — use `new` or a descriptive name"
 }
 
 pub struct OneConstructorName;
 impl_lint_pass!(OneConstructorName => [ONE_CONSTRUCTOR_NAME]);
+
+const FORBIDDEN_NAMES: &[&str] = &["build", "construct", "create", "init", "make"];
 
 fn returns_self(early_context: &EarlyContext<'_>, fn_decl: &ast::FnDecl) -> bool {
     let ast::FnRetTy::Ty(ref ty) = fn_decl.output else {
@@ -90,14 +95,14 @@ impl EarlyLintPass for OneConstructorName {
                 ast::AssocItemKind::Fn(ref fn_box) => Some((assoc, fn_box)),
                 _ => None,
             })
-            .filter(|(_, fn_box)| fn_box.ident.name.as_str() != "new")
+            .filter(|(_, fn_box)| FORBIDDEN_NAMES.contains(&fn_box.ident.name.as_str()))
             .filter(|(_, fn_box)| !has_self_receiver(&fn_box.sig.decl))
             .filter(|(_, fn_box)| returns_self(early_context, &fn_box.sig.decl))
             .for_each(|(assoc, fn_box)| {
                 let name = fn_box.ident.name.to_string();
                 early_context.opt_span_lint(ONE_CONSTRUCTOR_NAME, Some(assoc.span), |diag| {
                     diag.primary_message(format!(
-                        "constructor `{name}` must be named `new` (returns `Self`, no `self` receiver)"
+                        "constructor `{name}` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)"
                     ));
                 });
             });
