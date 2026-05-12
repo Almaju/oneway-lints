@@ -267,10 +267,11 @@ USAGE:
     cargo oneway [SUBCOMMAND] [--fix] [CARGO_ARGS...]
 
 SUBCOMMANDS:
-    fmt     Apply Oneway rustfmt config to the workspace
-    lint    Run clippy + oneway-lints with the Oneway lint set
-    update  Reinstall the latest `cargo-oneway` from crates.io
-    help    Print this message
+    fmt        Apply Oneway rustfmt config to the workspace
+    lint       Run clippy + oneway-lints with the Oneway lint set
+    update     Reinstall the latest `cargo-oneway` from crates.io
+    version    Print the installed CLI version (also: --version, -V)
+    help       Print this message
 
 With no subcommand, runs `fmt --check`, clippy, and oneway-lints — failing
 if any step fails. CARGO_ARGS are forwarded to the underlying cargo command.
@@ -311,6 +312,10 @@ fn dispatch() -> io::Result<i32> {
         None => run_all(&lint_opts),
         Some("--help") | Some("-h") | Some("help") => {
             print_help();
+            Ok(0)
+        },
+        Some("--version") | Some("-V") | Some("version") => {
+            println!("cargo-oneway {}", env!("CARGO_PKG_VERSION"));
             Ok(0)
         },
         Some("fmt") => run_fmt(passthrough, FmtMode::Apply),
