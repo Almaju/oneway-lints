@@ -4,6 +4,11 @@ All notable changes to the `cargo-oneway` CLI and the bundled `oneway-lints` lib
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). From v0.1.7 onward, the CLI version pins the lint library to the matching `vX.Y.Z` git tag — `cargo install cargo-oneway --version X.Y.Z` gives you exactly the rules from this section.
 
+## [0.1.14] - 2026-05-12
+
+### Added
+- **Autofix for `type_derived_naming` (function parameters)** — `cargo oneway lint --fix` renames the parameter *and* every single-segment Path expression in the fn body that references it. Implementation pre-walks each fn body to collect path references and pat-binding counts per name. Skipped when the name appears as an inner pat-binding (`let`, `if let`, match arm) — that shadow would make a global rename point past the new binding. `let`-binding cases are diagnostic-only (their scope is "rest of enclosing block until shadowed", which we don't track precisely).
+
 ## [0.1.12] - 2026-05-12
 
 ### Added
@@ -82,6 +87,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fro
 - Auto-publish workflow: every push to `main` bumps the CLI patch version and publishes to crates.io.
 - 23 lints — sorting (struct fields, enum variants, match arms, derives, impl methods, mod-after-use), comments policy, no-panic / no-unwrap, type-derived naming, single-constructor name, primitives-wrapped-in-newtypes, no-self-orchestration, and more.
 
+[0.1.14]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.14
 [0.1.12]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.12
 [0.1.11]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.11
 [0.1.10]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.10

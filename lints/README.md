@@ -85,9 +85,9 @@ All sorting rules are autofixable via `cargo oneway lint --fix` (with safe exemp
 
 ## Naming
 
-| Lint | Severity | Tool | One-liner |
-|------|----------|------|-----------|
-| [`type_derived_naming`](docs/type_derived_naming.md) | deny | dylint | Function params and ascribed `let` bindings — name must be snake_case of type |
+| Lint | Severity | Tool | Autofix | One-liner |
+|------|----------|------|---------|-----------|
+| [`type_derived_naming`](docs/type_derived_naming.md) | deny | dylint | ✓ for fn params (not when name is shadowed in body); diagnostic-only for `let` bindings | Function params and ascribed `let` bindings — name must be snake_case of type |
 
 ## Module Organization
 
