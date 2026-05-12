@@ -4,6 +4,24 @@ All notable changes to the `cargo-oneway` CLI and the bundled `oneway-lints` lib
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). From v0.1.7 onward, the CLI version pins the lint library to the matching `vX.Y.Z` git tag — `cargo install cargo-oneway --version X.Y.Z` gives you exactly the rules from this section.
 
+## [0.1.12] - 2026-05-12
+
+### Added
+- **Autofix for `unsorted_match_arms`** — `cargo oneway lint --fix` swaps non-wildcard arms to their sorted positions via a multi-part suggestion. Skipped when any arm has a guard (`pat if cond`) since guard arms can overlap with later patterns. Skipped when a wildcard arm is mis-positioned (the diagnostic still fires).
+- **Autofix for `unsorted_impl_methods`** — full sort of methods by (group, name) via multi-part swap. Non-method associated items (consts, types) stay in place. The rule now computes the desired order once and emits a single diagnostic at the first divergence.
+- **Autofix for `mod_after_use`** — one diagnostic per item list with a multi-part suggestion that rewrites all `mod`/`use` items into mods-first order. Other items (`fn`, `struct`, etc.) stay where they are.
+
+## [0.1.11] - 2026-05-12
+
+### Added
+- **Autofix for `unsorted_enum_variants`** — multi-part swap of variants to their sorted positions. Skipped when variant order is load-bearing: derived `Ord` / `PartialOrd` / `Hash` (compared by declaration order), or any variant has an explicit discriminant. Derive detection probes the source text immediately before the item since `#[derive(...)]` isn't in `item.attrs` at the EarlyLintPass stage.
+
+## [0.1.10] - 2026-05-12
+
+### Added
+- **Autofix for `unsorted_derives`** — `cargo oneway lint --fix` replaces `#[derive(...)]` with the alphabetically sorted version. Pure textual sort, no semantic risk.
+- **Autofix for `unsorted_struct_fields`** — multi-part suggestion swaps each field's source range (including attributes and doc comments) to its sorted-rank counterpart. Skipped when the struct carries `#[repr(...)]` since field order is load-bearing for FFI and packed layouts.
+
 ## [0.1.8] - 2026-05-12
 
 ### Added
@@ -64,6 +82,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fro
 - Auto-publish workflow: every push to `main` bumps the CLI patch version and publishes to crates.io.
 - 23 lints — sorting (struct fields, enum variants, match arms, derives, impl methods, mod-after-use), comments policy, no-panic / no-unwrap, type-derived naming, single-constructor name, primitives-wrapped-in-newtypes, no-self-orchestration, and more.
 
+[0.1.12]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.12
+[0.1.11]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.11
+[0.1.10]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.10
 [0.1.8]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.8
 [0.1.7]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.7
 [0.1.6]: https://github.com/Almaju/oneway-lints/releases/tag/v0.1.6

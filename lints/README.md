@@ -38,14 +38,16 @@ The "Tool" column on every rule below tells you which one fires. `cargo oneway` 
 
 ## Sorting
 
-| Lint | Severity | Tool | One-liner |
-|------|----------|------|-----------|
-| [`unsorted_struct_fields`](docs/unsorted_struct_fields.md) | deny | dylint | Struct fields must be alphabetical |
-| [`unsorted_enum_variants`](docs/unsorted_enum_variants.md) | deny | dylint | Enum variants must be alphabetical |
-| [`unsorted_match_arms`](docs/unsorted_match_arms.md) | deny | dylint | Match arms sorted, `_` last |
-| [`mod_after_use`](docs/mod_after_use.md) | deny | dylint | `mod` declarations must come before `use` statements |
-| [`unsorted_impl_methods`](docs/unsorted_impl_methods.md) | deny | dylint | `impl` methods grouped (static, public, private), alphabetical within group |
-| [`unsorted_derives`](docs/unsorted_derives.md) | deny | dylint | `#[derive()]` traits in alphabetical order |
+All sorting rules are autofixable via `cargo oneway lint --fix` (with safe exemptions for cases where the order is load-bearing — see each rule's doc).
+
+| Lint | Severity | Tool | Autofix | One-liner |
+|------|----------|------|---------|-----------|
+| [`unsorted_struct_fields`](docs/unsorted_struct_fields.md) | deny | dylint | ✓ (not when `#[repr]`) | Struct fields must be alphabetical |
+| [`unsorted_enum_variants`](docs/unsorted_enum_variants.md) | deny | dylint | ✓ (not when derived `Ord`/`Hash` or explicit discriminants) | Enum variants must be alphabetical |
+| [`unsorted_match_arms`](docs/unsorted_match_arms.md) | deny | dylint | ✓ (not when any arm has a guard) | Match arms sorted, `_` last |
+| [`mod_after_use`](docs/mod_after_use.md) | deny | dylint | ✓ | `mod` declarations must come before `use` statements |
+| [`unsorted_impl_methods`](docs/unsorted_impl_methods.md) | deny | dylint | ✓ | `impl` methods grouped (static, public, private), alphabetical within group |
+| [`unsorted_derives`](docs/unsorted_derives.md) | deny | dylint | ✓ | `#[derive()]` traits in alphabetical order |
 
 ## Function Discipline
 
