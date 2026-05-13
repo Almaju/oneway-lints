@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
-# Run `cargo oneway` against both crates before allowing a push.
+# Run the local `cargo-oneway` against both crates before allowing a push.
 # Enable with: git config core.hooksPath .githooks
+#
+# WHY a locally-built binary instead of `cargo oneway` on PATH: pushing a
+# CLI change should be validated against the change itself, not against
+# whatever version happens to be installed globally — a stale install
+# would let bad code through, and a local CLI fix wouldn't be exercised.
 set -euo pipefail
-
-if ! command -v cargo-oneway >/dev/null 2>&1; then
-    echo "pre-push: cargo-oneway not found on PATH." >&2
-    echo "         install with: cargo install cargo-oneway" >&2
-    echo "         (or skip this push with --no-verify)" >&2
-    exit 1
-fi
 
 repo_root="$(git rev-parse --show-toplevel)"
 export ONEWAY_LINTS_PATH="$repo_root/lints"
 
+echo "pre-push: building local cargo-oneway..."
+cargo build --manifest-path "$repo_root/cli/Cargo.toml" --bin cargo-oneway --quiet
+cargo_oneway="$repo_root/cli/target/debug/cargo-oneway"
+
 status=0
 for crate in cli lints; do
     echo "pre-push: cargo oneway in $crate/"
-    if ! (cd "$repo_root/$crate" && cargo oneway); then
+    if ! (cd "$repo_root/$crate" && "$cargo_oneway" oneway); then
         status=1
     fi
 done
