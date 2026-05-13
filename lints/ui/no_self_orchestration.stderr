@@ -12,5 +12,41 @@ error: public method `sync` calls public method `self.put()` — extract this co
 LL |         self.put(item);
    |              ^^^
 
-error: aborting due to 2 previous errors
+error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
+  --> $DIR/no_self_orchestration.rs:15:5
+   |
+LL | /     pub fn list(&self) -> ItemList {
+LL | |         ItemList
+LL | |     }
+   | |_____^
+   |
+   = note: `#[deny(subject_first_param)]` on by default
+
+error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
+  --> $DIR/no_self_orchestration.rs:18:5
+   |
+LL |     pub fn put(&self, _item: Item) {}
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
+  --> $DIR/no_self_orchestration.rs:29:5
+   |
+LL | /     fn helper(&self) -> ItemList {
+LL | |         ItemList
+LL | |     }
+   | |_____^
+
+error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
+  --> $DIR/no_self_orchestration.rs:41:5
+   |
+LL |     pub fn method(&self) {}
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
+  --> $DIR/no_self_orchestration.rs:57:5
+   |
+LL |     pub fn list(&self) {}
+   |     ^^^^^^^^^^^^^^^^^^^^^
+
+error: aborting due to 7 previous errors
 

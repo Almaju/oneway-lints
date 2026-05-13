@@ -26,6 +26,19 @@ LL +     },
 LL + }
    |
 
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/no_if_else.rs:1:1
+   |
+LL | / pub fn classify(n: i32) -> &'static str {
+LL | |     if n < 0 {
+LL | |         "negative"
+LL | |     } else if n == 0 {
+...  |
+LL | | }
+   | |_^
+   |
+   = note: `#[deny(subject_first_param)]` on by default
+
 warning: param `n` uses raw primitive `i32` — wrap it in a newtype
   --> $DIR/no_if_else.rs:1:17
    |
@@ -40,6 +53,27 @@ LL +
 LL ~ pub fn classify(n: N) -> &'static str {
    |
 
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/no_if_else.rs:11:1
+   |
+LL | / pub fn allowed(opt: Option<i32>) -> i32 {
+LL | |     if let Some(x) = opt {
+LL | |         x
+LL | |     } else {
+...  |
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/no_if_else.rs:19:1
+   |
+LL | / pub fn no_else(x: bool) {
+LL | |     if x {
+LL | |         let _ = 1;
+LL | |     }
+LL | | }
+   | |_^
+
 warning: param `x` uses raw primitive `bool` — wrap it in a newtype
   --> $DIR/no_if_else.rs:19:16
    |
@@ -53,5 +87,5 @@ LL +
 LL ~ pub fn no_else(x: X) {
    |
 
-warning: 3 warnings emitted
+error: aborting due to 3 previous errors; 3 warnings emitted
 

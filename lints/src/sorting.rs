@@ -1,19 +1,28 @@
+use std::ops::Deref;
+
 use rustc_ast::ast;
 use rustc_errors::Applicability;
 use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
 use rustc_session::{declare_lint, impl_lint_pass};
 use rustc_span::Span;
 
-/// Returns `Some((index, prev_name, curr_name))` for the first pair of
-/// adjacent names that are out of alphabetical order.
-fn first_unsorted(names: &[String]) -> Option<(usize, String, String)> {
-    names
-        .windows(2)
-        .enumerate()
-        .find_map(|(i, w)| match w[0] > w[1] {
-            false => None,
-            true => Some((i + 1, w[0].clone(), w[1].clone())),
-        })
+use crate::path_ext::PathExt;
+
+trait NamesExt {
+    /// Returns `Some((index, prev_name, curr_name))` for the first pair of
+    /// adjacent names that are out of alphabetical order.
+    fn first_unsorted(&self) -> Option<(usize, String, String)>;
+}
+
+impl NamesExt for [String] {
+    fn first_unsorted(&self) -> Option<(usize, String, String)> {
+        self.windows(2)
+            .enumerate()
+            .find_map(|(i, w)| match w[0] > w[1] {
+                false => None,
+                true => Some((i + 1, w[0].clone(), w[1].clone())),
+            })
+    }
 }
 
 pub struct Msg(pub String);
@@ -25,16 +34,18 @@ struct LintEmission<'a> {
     span: Span,
 }
 
-fn emit_lint(lint_emission: LintEmission<'_>) {
-    let LintEmission {
-        early_context,
-        lint,
-        msg: Msg(msg),
-        span,
-    } = lint_emission;
-    early_context.opt_span_lint(lint, Some(span), |diag| {
-        diag.primary_message(msg);
-    });
+impl LintEmission<'_> {
+    fn emit(self) {
+        let LintEmission {
+            early_context,
+            lint,
+            msg: Msg(msg),
+            span,
+        } = self;
+        early_context.opt_span_lint(lint, Some(span), |diag| {
+            diag.primary_message(msg);
+        });
+    }
 }
 
 declare_lint! {
@@ -47,20 +58,31 @@ declare_lint! {
 pub struct UnsortedStructFields;
 impl_lint_pass!(UnsortedStructFields => [UNSORTED_STRUCT_FIELDS]);
 
-fn field_full_span(field_def: &ast::FieldDef) -> Span {
-    let attr_lo = field_def
-        .attrs
-        .iter()
-        .map(|a| a.span.lo())
-        .min()
-        .unwrap_or(field_def.span.lo());
-    field_def.span.with_lo(attr_lo)
+trait FieldDefExt {
+    fn full_span(&self) -> Span;
 }
 
-fn has_repr_attr(attrs: &[ast::Attribute]) -> bool {
-    attrs
-        .iter()
-        .any(|attr| attr.ident().is_some_and(|id| id.name.as_str() == "repr"))
+impl FieldDefExt for ast::FieldDef {
+    fn full_span(&self) -> Span {
+        let attr_lo = self
+            .attrs
+            .iter()
+            .map(|a| a.span.lo())
+            .min()
+            .unwrap_or(self.span.lo());
+        self.span.with_lo(attr_lo)
+    }
+}
+
+trait AttrsExt {
+    fn has_repr_attr(&self) -> bool;
+}
+
+impl AttrsExt for [ast::Attribute] {
+    fn has_repr_attr(&self) -> bool {
+        self.iter()
+            .any(|attr| attr.ident().is_some_and(|id| id.name.as_str() == "repr"))
+    }
 }
 
 impl EarlyLintPass for UnsortedStructFields {
@@ -75,7 +97,7 @@ impl EarlyLintPass for UnsortedStructFields {
             if names.len() != fields.len() || names.len() < 2 {
                 return;
             }
-            if let Some((idx, prev, curr)) = first_unsorted(&names) {
+            if let Some((idx, prev, curr)) = names.first_unsorted() {
                 let span = fields[idx].span;
                 let msg = format!(
                     "struct field `{curr}` should come before `{prev}` (alphabetical order required)"
@@ -83,17 +105,18 @@ impl EarlyLintPass for UnsortedStructFields {
                 // WHY: skip autofix when `#[repr(...)]` is present — field
                 // order is load-bearing for FFI and packed layouts. We still
                 // emit the diagnostic so the author can decide.
-                if has_repr_attr(&item.attrs) {
-                    emit_lint(LintEmission {
+                if item.attrs.has_repr_attr() {
+                    LintEmission {
                         early_context,
                         lint: UNSORTED_STRUCT_FIELDS,
                         msg: Msg(msg),
                         span,
-                    });
+                    }
+                    .emit();
                     return;
                 }
                 let source_map = early_context.sess().source_map();
-                let full_spans: Vec<Span> = fields.iter().map(field_full_span).collect();
+                let full_spans: Vec<Span> = fields.iter().map(|f| f.full_span()).collect();
                 let texts: Vec<String> = full_spans
                     .iter()
                     .map(|s| source_map.span_to_snippet(*s).unwrap_or_default())
@@ -137,7 +160,7 @@ impl EarlyLintPass for UnsortedEnumVariants {
             if names.len() < 2 {
                 return;
             }
-            if let Some((idx, prev, curr)) = first_unsorted(&names) {
+            if let Some((idx, prev, curr)) = names.first_unsorted() {
                 let span = enum_def.variants[idx].span;
                 let msg = format!(
                     "enum variant `{curr}` should come before `{prev}` (alphabetical order required)"
@@ -164,17 +187,18 @@ impl EarlyLintPass for UnsortedEnumVariants {
                 let has_explicit_discriminant =
                     enum_def.variants.iter().any(|v| v.disr_expr.is_some());
                 if has_order_derive || has_explicit_discriminant {
-                    emit_lint(LintEmission {
+                    LintEmission {
                         early_context,
                         lint: UNSORTED_ENUM_VARIANTS,
                         msg: Msg(msg),
                         span,
-                    });
+                    }
+                    .emit();
                     return;
                 }
                 let source_map = early_context.sess().source_map();
                 let full_spans: Vec<Span> =
-                    enum_def.variants.iter().map(variant_full_span).collect();
+                    enum_def.variants.iter().map(|v| v.full_span()).collect();
                 let texts: Vec<String> = full_spans
                     .iter()
                     .map(|s| source_map.span_to_snippet(*s).unwrap_or_default())
@@ -197,14 +221,20 @@ impl EarlyLintPass for UnsortedEnumVariants {
     }
 }
 
-fn variant_full_span(variant: &ast::Variant) -> Span {
-    let attr_lo = variant
-        .attrs
-        .iter()
-        .map(|a| a.span.lo())
-        .min()
-        .unwrap_or(variant.span.lo());
-    variant.span.with_lo(attr_lo)
+trait VariantExt {
+    fn full_span(&self) -> Span;
+}
+
+impl VariantExt for ast::Variant {
+    fn full_span(&self) -> Span {
+        let attr_lo = self
+            .attrs
+            .iter()
+            .map(|a| a.span.lo())
+            .min()
+            .unwrap_or(self.span.lo());
+        self.span.with_lo(attr_lo)
+    }
 }
 
 declare_lint! {
@@ -218,14 +248,20 @@ declare_lint! {
 pub struct UnsortedMatchArms;
 impl_lint_pass!(UnsortedMatchArms => [UNSORTED_MATCH_ARMS]);
 
-fn arm_full_span(arm: &ast::Arm) -> Span {
-    let attr_lo = arm
-        .attrs
-        .iter()
-        .map(|a| a.span.lo())
-        .min()
-        .unwrap_or(arm.span.lo());
-    arm.span.with_lo(attr_lo)
+trait ArmExt {
+    fn full_span(&self) -> Span;
+}
+
+impl ArmExt for ast::Arm {
+    fn full_span(&self) -> Span {
+        let attr_lo = self
+            .attrs
+            .iter()
+            .map(|a| a.span.lo())
+            .min()
+            .unwrap_or(self.span.lo());
+        self.span.with_lo(attr_lo)
+    }
 }
 
 impl EarlyLintPass for UnsortedMatchArms {
@@ -258,21 +294,22 @@ impl EarlyLintPass for UnsortedMatchArms {
                 // WHY: no autofix — moving the wildcard arm could collapse
                 // multiple wildcard-like arms or change matching priority for
                 // arms with overlapping patterns. Author's call.
-                emit_lint(LintEmission {
+                LintEmission {
                     early_context,
                     lint: UNSORTED_MATCH_ARMS,
                     msg: Msg(format!(
                         "match arm `{snippet}` appears after wildcard `_`; wildcard must be last"
                     )),
                     span: *span,
-                });
+                }
+                .emit();
                 return;
             }
 
             let non_wild: Vec<&(String, bool, Span)> =
                 arm_keys.iter().filter(|(_, w, _)| !w).collect();
             let names: Vec<String> = non_wild.iter().map(|(s, _, _)| s.clone()).collect();
-            if let Some((idx, prev, curr)) = first_unsorted(&names) {
+            if let Some((idx, prev, curr)) = names.first_unsorted() {
                 let span = non_wild[idx].2;
                 let msg = format!(
                     "match arm `{curr}` should come before `{prev}` (alphabetical order required)"
@@ -282,15 +319,16 @@ impl EarlyLintPass for UnsortedMatchArms {
                 // change which arm matches.
                 let has_guard = arms.iter().any(|a| a.guard.is_some());
                 if has_guard {
-                    emit_lint(LintEmission {
+                    LintEmission {
                         early_context,
                         lint: UNSORTED_MATCH_ARMS,
                         msg: Msg(msg),
                         span,
-                    });
+                    }
+                    .emit();
                     return;
                 }
-                let full_spans: Vec<Span> = arms.iter().map(arm_full_span).collect();
+                let full_spans: Vec<Span> = arms.iter().map(|a| a.full_span()).collect();
                 let texts: Vec<String> = full_spans
                     .iter()
                     .map(|s| source_map.span_to_snippet(*s).unwrap_or_default())
@@ -333,83 +371,82 @@ declare_lint! {
 pub struct ModAfterUse;
 impl_lint_pass!(ModAfterUse => [MOD_AFTER_USE]);
 
-fn check_mod_after_use<T: std::ops::Deref<Target = ast::Item>>(
-    early_context: &EarlyContext<'_>,
-    items: &[T],
-) {
-    let mod_use_indices: Vec<usize> = items
-        .iter()
-        .enumerate()
-        .filter(|(_, item)| !item.span.from_expansion())
-        .filter(|(_, item)| matches!(item.kind, ast::ItemKind::Mod(..) | ast::ItemKind::Use(_)))
-        .map(|(i, _)| i)
-        .collect();
+trait ItemsExt {
+    fn check_mod_after_use(&self, early_context: &EarlyContext<'_>);
+}
 
-    let first_misplaced = mod_use_indices.iter().enumerate().find(|(seq_idx, &i)| {
-        if !matches!(items[i].kind, ast::ItemKind::Mod(..)) {
-            return false;
-        }
-        mod_use_indices[..*seq_idx]
+impl<T: Deref<Target = ast::Item>> ItemsExt for [T] {
+    fn check_mod_after_use(&self, early_context: &EarlyContext<'_>) {
+        let mod_use_indices: Vec<usize> = self
             .iter()
-            .any(|&j| matches!(items[j].kind, ast::ItemKind::Use(_)))
-    });
-    let Some((_, &first_misplaced_index)) = first_misplaced else {
-        return;
-    };
+            .enumerate()
+            .filter(|(_, item)| !item.span.from_expansion())
+            .filter(|(_, item)| matches!(item.kind, ast::ItemKind::Mod(..) | ast::ItemKind::Use(_)))
+            .map(|(i, _)| i)
+            .collect();
 
-    let msg = "`mod` declaration must come before any `use` statement".to_string();
-    let span = items[first_misplaced_index].span;
-
-    let source_map = early_context.sess().source_map();
-    let texts: Vec<String> = mod_use_indices
-        .iter()
-        .map(|&i| {
-            source_map
-                .span_to_snippet(items[i].span)
-                .unwrap_or_default()
-        })
-        .collect();
-    let mods_first: Vec<usize> = mod_use_indices
-        .iter()
-        .copied()
-        .filter(|&i| matches!(items[i].kind, ast::ItemKind::Mod(..)))
-        .chain(
-            mod_use_indices
+        let first_misplaced = mod_use_indices.iter().enumerate().find(|(seq_idx, &i)| {
+            if !matches!(self[i].kind, ast::ItemKind::Mod(..)) {
+                return false;
+            }
+            mod_use_indices[..*seq_idx]
                 .iter()
-                .copied()
-                .filter(|&i| matches!(items[i].kind, ast::ItemKind::Use(_))),
-        )
-        .collect();
-    let parts: Vec<(Span, String)> = mod_use_indices
-        .iter()
-        .zip(&mods_first)
-        .map(|(&dest_idx, &src_idx)| {
-            let src_pos = mod_use_indices
-                .iter()
-                .position(|&i| i == src_idx)
-                .unwrap_or(0);
-            (items[dest_idx].span, texts[src_pos].clone())
-        })
-        .collect();
+                .any(|&j| matches!(self[j].kind, ast::ItemKind::Use(_)))
+        });
+        let Some((_, &first_misplaced_index)) = first_misplaced else {
+            return;
+        };
 
-    early_context.opt_span_lint(MOD_AFTER_USE, Some(span), |diag| {
-        diag.primary_message(msg);
-        diag.multipart_suggestion(
-            "move all `mod` declarations before `use` statements",
-            parts,
-            Applicability::MachineApplicable,
-        );
-    });
+        let msg = "`mod` declaration must come before any `use` statement".to_string();
+        let span = self[first_misplaced_index].span;
+
+        let source_map = early_context.sess().source_map();
+        let texts: Vec<String> = mod_use_indices
+            .iter()
+            .map(|&i| source_map.span_to_snippet(self[i].span).unwrap_or_default())
+            .collect();
+        let mods_first: Vec<usize> = mod_use_indices
+            .iter()
+            .copied()
+            .filter(|&i| matches!(self[i].kind, ast::ItemKind::Mod(..)))
+            .chain(
+                mod_use_indices
+                    .iter()
+                    .copied()
+                    .filter(|&i| matches!(self[i].kind, ast::ItemKind::Use(_))),
+            )
+            .collect();
+        let parts: Vec<(Span, String)> = mod_use_indices
+            .iter()
+            .zip(&mods_first)
+            .map(|(&dest_idx, &src_idx)| {
+                let src_pos = mod_use_indices
+                    .iter()
+                    .position(|&i| i == src_idx)
+                    .unwrap_or(0);
+                (self[dest_idx].span, texts[src_pos].clone())
+            })
+            .collect();
+
+        early_context.opt_span_lint(MOD_AFTER_USE, Some(span), |diag| {
+            diag.primary_message(msg);
+            diag.multipart_suggestion(
+                "move all `mod` declarations before `use` statements",
+                parts,
+                Applicability::MachineApplicable,
+            );
+        });
+    }
 }
 
 impl EarlyLintPass for ModAfterUse {
     fn check_crate(&mut self, early_context: &EarlyContext<'_>, crate_root: &ast::Crate) {
-        check_mod_after_use(early_context, &crate_root.items);
+        crate_root.items.check_mod_after_use(early_context);
     }
 
     fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
         if let ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(ref items, ..)) = item.kind {
-            check_mod_after_use(early_context, items);
+            items.check_mod_after_use(early_context);
         }
     }
 }
@@ -448,27 +485,39 @@ impl MethodGroup {
     }
 }
 
-fn classify_fn(fn_box: &ast::Fn, visibility: &ast::Visibility) -> MethodGroup {
-    let has_self = fn_box.sig.decl.inputs.first().is_some_and(|p| p.is_self());
-    let is_public = matches!(
-        visibility.kind,
-        ast::VisibilityKind::Public | ast::VisibilityKind::Restricted { .. }
-    );
-    match (has_self, is_public) {
-        (false, _) => MethodGroup::Static,
-        (true, false) => MethodGroup::Private,
-        (true, true) => MethodGroup::Public,
+trait FnExt {
+    fn classify(&self, visibility: &ast::Visibility) -> MethodGroup;
+}
+
+impl FnExt for ast::Fn {
+    fn classify(&self, visibility: &ast::Visibility) -> MethodGroup {
+        let has_self = self.sig.decl.inputs.first().is_some_and(|p| p.is_self());
+        let is_public = matches!(
+            visibility.kind,
+            ast::VisibilityKind::Public | ast::VisibilityKind::Restricted { .. }
+        );
+        match (has_self, is_public) {
+            (false, _) => MethodGroup::Static,
+            (true, false) => MethodGroup::Private,
+            (true, true) => MethodGroup::Public,
+        }
     }
 }
 
-fn assoc_full_span(assoc_item: &ast::AssocItem) -> Span {
-    let attr_lo = assoc_item
-        .attrs
-        .iter()
-        .map(|a| a.span.lo())
-        .min()
-        .unwrap_or(assoc_item.span.lo());
-    assoc_item.span.with_lo(attr_lo)
+trait AssocItemExt {
+    fn full_span(&self) -> Span;
+}
+
+impl AssocItemExt for ast::AssocItem {
+    fn full_span(&self) -> Span {
+        let attr_lo = self
+            .attrs
+            .iter()
+            .map(|a| a.span.lo())
+            .min()
+            .unwrap_or(self.span.lo());
+        self.span.with_lo(attr_lo)
+    }
 }
 
 impl EarlyLintPass for UnsortedImplMethods {
@@ -497,8 +546,8 @@ impl EarlyLintPass for UnsortedImplMethods {
                     };
                     Some((
                         fn_box.ident.name.to_string(),
-                        classify_fn(fn_box, &assoc.vis),
-                        assoc_full_span(assoc),
+                        fn_box.classify(&assoc.vis),
+                        assoc.full_span(),
                     ))
                 })
                 .collect();
@@ -572,49 +621,47 @@ declare_lint! {
 pub struct UnsortedDerives;
 impl_lint_pass!(UnsortedDerives => [UNSORTED_DERIVES]);
 
-fn is_local_source_path(path: &std::path::Path) -> bool {
-    let s = path.to_string_lossy();
-    !s.contains("/.cargo/")
-        && !s.contains("/.rustup/")
-        && !s.contains("/rustlib/")
-        && !s.starts_with("<")
+trait SrcExt {
+    fn find_derive_attrs(&self) -> Vec<(usize, usize, String)>;
 }
 
 // WHY: hand-rolled byte-level scan for `#[derive(...)]` attributes — a state
 // machine that tracks paren depth. Iterator combinators can't express the
 // stateful "advance to matching `)`" sweep without becoming strictly less
 // readable than the imperative form.
-#[allow(no_if_else, raw_primitive_param)]
-fn find_derive_attrs(src: &str) -> Vec<(usize, usize, String)> {
-    let bytes = src.as_bytes();
-    let needle = b"#[derive(";
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i + needle.len() <= bytes.len() {
-        if &bytes[i..i + needle.len()] == needle {
-            let start = i;
-            let mut j = i + needle.len();
-            let mut depth: i32 = 1;
-            while j < bytes.len() && depth > 0 {
-                match bytes[j] {
-                    b'(' => depth += 1,
-                    b')' => depth -= 1,
-                    _ => {},
+#[allow(no_if_else)]
+impl SrcExt for str {
+    fn find_derive_attrs(&self) -> Vec<(usize, usize, String)> {
+        let bytes = self.as_bytes();
+        let needle = b"#[derive(";
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i + needle.len() <= bytes.len() {
+            if &bytes[i..i + needle.len()] == needle {
+                let start = i;
+                let mut j = i + needle.len();
+                let mut depth: i32 = 1;
+                while j < bytes.len() && depth > 0 {
+                    match bytes[j] {
+                        b'(' => depth += 1,
+                        b')' => depth -= 1,
+                        _ => {},
+                    }
+                    j += 1;
                 }
-                j += 1;
+                if depth == 0 && j < bytes.len() && bytes[j] == b']' {
+                    let inner_start = i + needle.len();
+                    let inner_end = j - 1;
+                    let inner = &self[inner_start..inner_end];
+                    out.push((start, j + 1, inner.to_string()));
+                    i = j + 1;
+                    continue;
+                }
             }
-            if depth == 0 && j < bytes.len() && bytes[j] == b']' {
-                let inner_start = i + needle.len();
-                let inner_end = j - 1;
-                let inner = &src[inner_start..inner_end];
-                out.push((start, j + 1, inner.to_string()));
-                i = j + 1;
-                continue;
-            }
+            i += 1;
         }
-        i += 1;
+        out
     }
-    out
 }
 
 impl EarlyLintPass for UnsortedDerives {
@@ -625,14 +672,14 @@ impl EarlyLintPass for UnsortedDerives {
                 rustc_span::FileName::Real(real) => real.local_path_if_available().to_path_buf(),
                 _ => return,
             };
-            if !is_local_source_path(&path) {
+            if !path.is_local_source() {
                 return;
             }
             let Some(src) = file.src.as_ref() else {
                 return;
             };
             let base = file.start_pos;
-            find_derive_attrs(src).into_iter().for_each(|(lo, hi, inner)| {
+            src.find_derive_attrs().into_iter().for_each(|(lo, hi, inner)| {
                 let names: Vec<String> = inner
                     .split(',')
                     .map(|s| s.trim().to_string())
@@ -641,7 +688,7 @@ impl EarlyLintPass for UnsortedDerives {
                 if names.len() < 2 {
                     return;
                 }
-                if let Some((_idx, prev, curr)) = first_unsorted(&names) {
+                if let Some((_idx, prev, curr)) = names.first_unsorted() {
                     let span = Span::with_root_ctxt(
                         base + rustc_span::BytePos(lo as u32),
                         base + rustc_span::BytePos(hi as u32),

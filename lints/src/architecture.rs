@@ -21,26 +21,44 @@ declare_lint! {
 pub struct NoSelfOrchestration;
 impl_lint_pass!(NoSelfOrchestration => [NO_SELF_ORCHESTRATION]);
 
-fn impl_target_simple_name(impl_block: &ast::Impl) -> Option<String> {
-    let ast::TyKind::Path(_, ref path) = impl_block.self_ty.kind else {
-        return None;
-    };
-    path.segments.last().map(|seg| seg.ident.name.to_string())
+trait ImplExt {
+    fn target_simple_name(&self) -> Option<String>;
 }
 
-fn is_pub(visibility: &ast::Visibility) -> bool {
-    matches!(
-        visibility.kind,
-        ast::VisibilityKind::Public | ast::VisibilityKind::Restricted { .. }
-    )
+impl ImplExt for ast::Impl {
+    fn target_simple_name(&self) -> Option<String> {
+        let ast::TyKind::Path(_, ref path) = self.self_ty.kind else {
+            return None;
+        };
+        path.segments.last().map(|seg| seg.ident.name.to_string())
+    }
 }
 
-fn receiver_is_self(expr: &ast::Expr) -> bool {
-    match &expr.kind {
-        ast::ExprKind::Path(_, path) => {
-            path.segments.len() == 1 && path.segments[0].ident.name.as_str() == "self"
-        },
-        _ => false,
+trait VisibilityExt {
+    fn is_pub(&self) -> bool;
+}
+
+impl VisibilityExt for ast::Visibility {
+    fn is_pub(&self) -> bool {
+        matches!(
+            self.kind,
+            ast::VisibilityKind::Public | ast::VisibilityKind::Restricted { .. }
+        )
+    }
+}
+
+trait ExprExt {
+    fn is_self_receiver(&self) -> bool;
+}
+
+impl ExprExt for ast::Expr {
+    fn is_self_receiver(&self) -> bool {
+        match &self.kind {
+            ast::ExprKind::Path(_, path) => {
+                path.segments.len() == 1 && path.segments[0].ident.name.as_str() == "self"
+            },
+            _ => false,
+        }
     }
 }
 
@@ -52,11 +70,11 @@ impl<'ast> Visitor<'ast> for CollectVisitor {
     fn visit_item(&mut self, item: &'ast ast::Item) {
         if let ast::ItemKind::Impl(ref impl_block) = item.kind {
             if impl_block.of_trait.is_none() {
-                if let Some(type_name) = impl_target_simple_name(impl_block) {
+                if let Some(type_name) = impl_block.target_simple_name() {
                     let entry = self.pub_methods_by_type.entry(type_name).or_default();
                     impl_block.items.iter().for_each(|assoc| {
                         if let ast::AssocItemKind::Fn(ref fn_box) = assoc.kind {
-                            if is_pub(&assoc.vis) {
+                            if assoc.vis.is_pub() {
                                 entry.insert(fn_box.ident.name.to_string());
                             }
                         }
@@ -78,11 +96,11 @@ impl<'ast> Visitor<'ast> for CheckVisitor<'_, '_> {
         if !item.span.from_expansion() {
             if let ast::ItemKind::Impl(ref impl_block) = item.kind {
                 if impl_block.of_trait.is_none() {
-                    if let Some(type_name) = impl_target_simple_name(impl_block) {
+                    if let Some(type_name) = impl_block.target_simple_name() {
                         if let Some(pub_methods) = self.pub_methods_by_type.get(&type_name) {
                             impl_block.items.iter().for_each(|assoc| {
                                 if let ast::AssocItemKind::Fn(ref fn_box) = assoc.kind {
-                                    if is_pub(&assoc.vis) {
+                                    if assoc.vis.is_pub() {
                                         if let Some(block) = fn_box.body.as_ref() {
                                             let method_name = fn_box.ident.name.to_string();
                                             let mut visitor = OrchestrationVisitor {
@@ -122,7 +140,7 @@ struct OrchestrationVisitor<'a> {
 impl<'ast> Visitor<'ast> for OrchestrationVisitor<'_> {
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
         if let ast::ExprKind::MethodCall(method_call) = &expr.kind {
-            if receiver_is_self(&method_call.receiver) {
+            if method_call.receiver.is_self_receiver() {
                 let called = method_call.seg.ident.name.to_string();
                 if self.pub_methods.contains(&called) {
                     self.offenders.push((called, method_call.seg.ident.span));

@@ -23,147 +23,167 @@ pub struct TypeDerivedNaming;
 
 impl_lint_pass!(TypeDerivedNaming => [TYPE_DERIVED_NAMING]);
 
-#[allow(raw_primitive_param)]
-fn snake_case(s: &str) -> String {
-    s.chars()
-        .fold(
-            (String::with_capacity(s.len() + 4), false),
-            |(mut out, prev_lower), c| match c.is_ascii_uppercase() {
-                false => {
-                    out.push(c);
-                    let new_prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
-                    (out, new_prev_lower)
-                },
-                true => {
-                    if prev_lower {
-                        out.push('_');
-                    }
-                    out.extend(c.to_lowercase());
-                    (out, false)
-                },
-            },
-        )
-        .0
+trait StrExt {
+    /// WHY: auto traits and the default `Sized` bound carry no semantic
+    /// "what is this thing" info; they describe capabilities the type system
+    /// would otherwise infer or impose by default. Filtering them lets
+    /// `<M: Migrator + Send>` count as a single-bound generic.
+    fn is_auto_or_default_bound(&self) -> bool;
+    /// WHY: a single uppercase letter signals a placeholder generic parameter
+    /// (Rust convention: `T`, `K`, `V`, `E`, `M`). When such a generic carries
+    /// multiple trait bounds, demanding the binding match any single trait
+    /// makes no sense — the right fix is to rename the generic to its role.
+    fn is_placeholder_generic_name(&self) -> bool;
+    fn is_primitive_type_name(&self) -> bool;
+    fn is_stdlib_container(&self) -> bool;
+    fn matches_expected(&self, expected: &str) -> bool;
+    fn snake_case(&self) -> String;
 }
 
-fn extract_type_simple_name(ty: &ast::Ty) -> Option<String> {
-    match &ty.kind {
-        ast::TyKind::Path(_, path) => path.segments.last().map(|s| s.ident.name.to_string()),
-        ast::TyKind::Ref(_, mut_ty) => extract_type_simple_name(&mut_ty.ty),
-        _ => None,
+impl StrExt for str {
+    fn is_auto_or_default_bound(&self) -> bool {
+        matches!(self, "?Sized" | "Send" | "Sized" | "Sync" | "Unpin")
+    }
+
+    fn is_placeholder_generic_name(&self) -> bool {
+        self.chars().count() == 1 && self.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+    }
+
+    fn is_primitive_type_name(&self) -> bool {
+        matches!(
+            self,
+            "String"
+                | "bool"
+                | "char"
+                | "f32"
+                | "f64"
+                | "i128"
+                | "i16"
+                | "i32"
+                | "i64"
+                | "i8"
+                | "isize"
+                | "str"
+                | "u128"
+                | "u16"
+                | "u32"
+                | "u64"
+                | "u8"
+                | "usize"
+        )
+    }
+
+    fn is_stdlib_container(&self) -> bool {
+        matches!(
+            self,
+            "Arc"
+                | "BTreeMap"
+                | "BTreeSet"
+                | "Box"
+                | "Cell"
+                | "Cow"
+                | "HashMap"
+                | "HashSet"
+                | "Mutex"
+                | "Option"
+                | "Path"
+                | "PathBuf"
+                | "PhantomData"
+                | "Rc"
+                | "RefCell"
+                | "Result"
+                | "RwLock"
+                | "Vec"
+        )
+    }
+
+    fn matches_expected(&self, expected: &str) -> bool {
+        self == expected
+            || self.ends_with(&format!("_{expected}"))
+            || self.starts_with(&format!("{expected}_"))
+    }
+
+    fn snake_case(&self) -> String {
+        self.chars()
+            .fold(
+                (String::with_capacity(self.len() + 4), false),
+                |(mut out, prev_lower), c| match c.is_ascii_uppercase() {
+                    false => {
+                        out.push(c);
+                        let new_prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
+                        (out, new_prev_lower)
+                    },
+                    true => {
+                        if prev_lower {
+                            out.push('_');
+                        }
+                        out.extend(c.to_lowercase());
+                        (out, false)
+                    },
+                },
+            )
+            .0
     }
 }
 
-// WHY: auto traits and the default `Sized` bound carry no semantic
-// "what is this thing" info; they describe capabilities the type system
-// would otherwise infer or impose by default. Filtering them lets
-// `<M: Migrator + Send>` count as a single-bound generic.
-#[allow(raw_primitive_param)]
-fn is_auto_or_default_bound(name: &str) -> bool {
-    matches!(name, "?Sized" | "Send" | "Sized" | "Sync" | "Unpin")
+trait TyExt {
+    fn simple_name(&self) -> Option<String>;
 }
 
-// WHY: a single uppercase letter signals a placeholder generic parameter
-// (Rust convention: `T`, `K`, `V`, `E`, `M`). When such a generic carries
-// multiple trait bounds, demanding the binding match any single trait makes
-// no sense — the right fix is to rename the generic to its role.
-#[allow(raw_primitive_param)]
-fn is_placeholder_generic_name(name: &str) -> bool {
-    name.chars().count() == 1 && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-}
-
-#[allow(raw_primitive_param)]
-fn is_primitive_type_name(name: &str) -> bool {
-    matches!(
-        name,
-        "String"
-            | "bool"
-            | "char"
-            | "f32"
-            | "f64"
-            | "i128"
-            | "i16"
-            | "i32"
-            | "i64"
-            | "i8"
-            | "isize"
-            | "str"
-            | "u128"
-            | "u16"
-            | "u32"
-            | "u64"
-            | "u8"
-            | "usize"
-    )
-}
-
-#[allow(raw_primitive_param)]
-fn is_stdlib_container(name: &str) -> bool {
-    matches!(
-        name,
-        "Arc"
-            | "BTreeMap"
-            | "BTreeSet"
-            | "Box"
-            | "Cell"
-            | "Cow"
-            | "HashMap"
-            | "HashSet"
-            | "Mutex"
-            | "Option"
-            | "Path"
-            | "PathBuf"
-            | "PhantomData"
-            | "Rc"
-            | "RefCell"
-            | "Result"
-            | "RwLock"
-            | "Vec"
-    )
-}
-
-#[allow(raw_primitive_param)]
-fn matches_expected(binding_name: &str, expected: &str) -> bool {
-    binding_name == expected
-        || binding_name.ends_with(&format!("_{expected}"))
-        || binding_name.starts_with(&format!("{expected}_"))
-}
-
-fn trait_bound_names(bounds: &[ast::GenericBound]) -> Vec<String> {
-    bounds
-        .iter()
-        .filter_map(|bound| match bound {
-            ast::GenericBound::Outlives(_) => None,
-            ast::GenericBound::Trait(poly_trait_ref) => {
-                let name = poly_trait_ref
-                    .trait_ref
-                    .path
-                    .segments
-                    .last()
-                    .map(|seg| seg.ident.name.to_string())?;
-                let prefix = match poly_trait_ref.modifiers.polarity {
-                    ast::BoundPolarity::Maybe(_) => "?",
-                    _ => "",
-                };
-                Some(format!("{prefix}{name}"))
-            },
-            ast::GenericBound::Use(..) => None,
-        })
-        .collect()
-}
-
-fn generic_param_bounds(generics: &ast::Generics) -> HashMap<String, Vec<String>> {
-    generics
-        .params
-        .iter()
-        .filter_map(|param| match &param.kind {
-            ast::GenericParamKind::Type { .. } => Some((
-                param.ident.name.to_string(),
-                trait_bound_names(&param.bounds),
-            )),
+impl TyExt for ast::Ty {
+    fn simple_name(&self) -> Option<String> {
+        match &self.kind {
+            ast::TyKind::Path(_, path) => path.segments.last().map(|s| s.ident.name.to_string()),
+            ast::TyKind::Ref(_, mut_ty) => mut_ty.ty.simple_name(),
             _ => None,
-        })
-        .collect()
+        }
+    }
+}
+
+trait BoundsExt {
+    fn trait_names(&self) -> Vec<String>;
+}
+
+impl BoundsExt for [ast::GenericBound] {
+    fn trait_names(&self) -> Vec<String> {
+        self.iter()
+            .filter_map(|bound| match bound {
+                ast::GenericBound::Outlives(_) => None,
+                ast::GenericBound::Trait(poly_trait_ref) => {
+                    let name = poly_trait_ref
+                        .trait_ref
+                        .path
+                        .segments
+                        .last()
+                        .map(|seg| seg.ident.name.to_string())?;
+                    let prefix = match poly_trait_ref.modifiers.polarity {
+                        ast::BoundPolarity::Maybe(_) => "?",
+                        _ => "",
+                    };
+                    Some(format!("{prefix}{name}"))
+                },
+                ast::GenericBound::Use(..) => None,
+            })
+            .collect()
+    }
+}
+
+trait GenericsExt {
+    fn param_bounds(&self) -> HashMap<String, Vec<String>>;
+}
+
+impl GenericsExt for ast::Generics {
+    fn param_bounds(&self) -> HashMap<String, Vec<String>> {
+        self.params
+            .iter()
+            .filter_map(|param| match &param.kind {
+                ast::GenericParamKind::Type { .. } => {
+                    Some((param.ident.name.to_string(), param.bounds.trait_names()))
+                },
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 struct BindingName<'a>(&'a str);
@@ -262,18 +282,20 @@ impl<'ast> Visitor<'ast> for PatBindingCounter<'_> {
     }
 }
 
-fn build_fn_context(block: &ast::Block) -> FnContext {
-    let mut refs = HashMap::new();
-    let mut collector = ReferenceCollector { refs: &mut refs };
-    visit::walk_block(&mut collector, block);
+impl From<&ast::Block> for FnContext {
+    fn from(block: &ast::Block) -> Self {
+        let mut refs = HashMap::new();
+        let mut collector = ReferenceCollector { refs: &mut refs };
+        visit::walk_block(&mut collector, block);
 
-    let mut pat_bindings = HashMap::new();
-    let mut counter = PatBindingCounter {
-        counts: &mut pat_bindings,
-    };
-    visit::walk_block(&mut counter, block);
+        let mut pat_bindings = HashMap::new();
+        let mut counter = PatBindingCounter {
+            counts: &mut pat_bindings,
+        };
+        visit::walk_block(&mut counter, block);
 
-    FnContext { pat_bindings, refs }
+        FnContext { pat_bindings, refs }
+    }
 }
 
 struct NamingVisitor<'cx> {
@@ -293,21 +315,21 @@ impl NamingVisitor<'_> {
         if binding_name.starts_with('_') {
             return;
         }
-        let Some(type_name) = extract_type_simple_name(ty) else {
+        let Some(type_name) = ty.simple_name() else {
             return;
         };
 
         if let Some(bounds) = self.lookup_generic(&type_name) {
             let effective: Vec<&str> = bounds
                 .iter()
-                .filter(|b| !is_auto_or_default_bound(b))
+                .filter(|b| !b.is_auto_or_default_bound())
                 .map(String::as_str)
                 .collect();
             match effective.as_slice() {
                 [] => return,
                 [single_bound] => {
-                    let expected = snake_case(single_bound);
-                    if matches_expected(binding_name, &expected) {
+                    let expected = single_bound.snake_case();
+                    if binding_name.matches_expected(&expected) {
                         return;
                     }
                     let msg = format!(
@@ -322,7 +344,7 @@ impl NamingVisitor<'_> {
                     return;
                 },
                 _ => {
-                    if is_placeholder_generic_name(&type_name) {
+                    if type_name.is_placeholder_generic_name() {
                         let bounds_str = effective.join(" + ");
                         self.early_context.opt_span_lint(
                             TYPE_DERIVED_NAMING,
@@ -335,8 +357,8 @@ impl NamingVisitor<'_> {
                         );
                         return;
                     }
-                    let expected = snake_case(&type_name);
-                    if matches_expected(binding_name, &expected) {
+                    let expected = type_name.snake_case();
+                    if binding_name.matches_expected(&expected) {
                         return;
                     }
                     let msg = format!(
@@ -353,11 +375,11 @@ impl NamingVisitor<'_> {
             }
         }
 
-        if is_primitive_type_name(&type_name) || is_stdlib_container(&type_name) {
+        if type_name.is_primitive_type_name() || type_name.is_stdlib_container() {
             return;
         }
-        let expected = snake_case(&type_name);
-        if matches_expected(binding_name, &expected) {
+        let expected = type_name.snake_case();
+        if binding_name.matches_expected(&expected) {
             return;
         }
         let msg = format!(
@@ -414,8 +436,11 @@ impl<'ast> Visitor<'ast> for NamingVisitor<'_> {
         _id: ast::NodeId,
     ) {
         if let FnKind::Fn(_, _, fn_box) = fn_kind {
-            self.scopes.push(generic_param_bounds(&fn_box.generics));
-            let body_context = fn_box.body.as_ref().map(|body| build_fn_context(body));
+            self.scopes.push(fn_box.generics.param_bounds());
+            let body_context = fn_box
+                .body
+                .as_ref()
+                .map(|body| FnContext::from(body.as_ref()));
             let pushed_fn = body_context.is_some();
             if let Some(ctx) = body_context {
                 self.fn_stack.push(ctx);
@@ -432,7 +457,7 @@ impl<'ast> Visitor<'ast> for NamingVisitor<'_> {
 
     fn visit_item(&mut self, item: &'ast ast::Item) {
         if let ast::ItemKind::Impl(ref impl_block) = item.kind {
-            self.scopes.push(generic_param_bounds(&impl_block.generics));
+            self.scopes.push(impl_block.generics.param_bounds());
             visit::walk_item(self, item);
             self.scopes.pop();
         } else {

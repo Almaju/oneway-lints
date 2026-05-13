@@ -60,5 +60,15 @@ LL +         Self
 LL +     }
    |
 
-error: aborting due to 5 previous errors
+error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
+  --> $DIR/one_constructor_name.rs:34:5
+   |
+LL | /     pub fn allowed_method(&self) -> Self {
+LL | |         Self
+LL | |     }
+   | |_____^
+   |
+   = note: `#[deny(subject_first_param)]` on by default
+
+error: aborting due to 6 previous errors
 

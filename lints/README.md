@@ -53,7 +53,7 @@ All sorting rules are autofixable via `cargo oneway lint --fix` (with safe exemp
 
 | Lint | Severity | Tool | Autofix | One-liner |
 |------|----------|------|---------|-----------|
-| [`too_many_params`](docs/too_many_params.md) | deny | `clippy::too_many_arguments` (threshold = 2) | — | Max 2 params: self + one input |
+| [`subject_first_param`](docs/subject_first_param.md) | deny | dylint | — | Every fn is `fn()`, `fn(self)`, or `fn(self, param)` — orphan fns with params discouraged |
 | [`no_nested_functions`](docs/no_nested_functions.md) | warn | dylint | ✓ for free fns (hoisted right after the outer); not for impl methods | Extract inner functions to module level |
 | [`one_constructor_name`](docs/one_constructor_name.md) | deny | dylint | ✓ when the type has exactly one forbidden constructor and no existing `new` — renames the fn and all `Type::name` call sites in the crate | Constructors must be called `new` |
 

@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fro
 
 ### Changed
 - `cargo oneway lint --fix` now passes `--broken-code` to the underlying `cargo fix` so autofixes whose intermediate state doesn't typecheck (every newtype-wrapping or rename suggestion) actually land instead of being silently rolled back. The CLI also adds `serde_json` as a dependency for the extraction pass.
+- **`too_many_params` → `subject_first_param`** — replaced the clippy-driven parameter-count cap with a custom dylint lint that enforces the *shape* of the signature, not just the count. The only allowed shapes are `fn()`, `fn(self)`, and `fn(self, param)`; free functions with parameters are now denied (make them methods on a type or wrap the inputs in a struct). Skipped for `extern "C"` declarations and trait *impl* method bodies (signatures fixed by the trait). The clippy.toml template and CLI `CLIPPY_DENY` entry for `clippy::too_many_arguments` have been removed.
+- **`subject_first_param` also flags methods that declare `self` but never reference it** — adding `&self` purely to satisfy the "subject first" rule is a syntactic dodge, not the spirit of the rule. A method that doesn't use `self` belongs as an extension trait on whichever type the body actually works with. Implemented via an AST visitor that walks the body looking for any `self` path expression. Both crates in this repo were refactored to satisfy the tightened rule — `is_local_path` / `is_primary_pub_type` and friends moved from lint-pass methods to `PathExt` / `ItemExt` extension traits on the foreign types they actually examine.
 
 ## [0.1.14] - 2026-05-12
 

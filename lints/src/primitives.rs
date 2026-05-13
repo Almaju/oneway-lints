@@ -11,60 +11,78 @@ const PRIMITIVES: &[&str] = &[
     "u128", "u16", "u32", "u64", "u8", "usize",
 ];
 
-fn primitive_name(ty: &ast::Ty) -> Option<&'static str> {
-    match &ty.kind {
-        ast::TyKind::Path(None, path)
-            if path.segments.len() == 1 && path.segments[0].args.is_none() =>
-        {
-            let name = path.segments[0].ident.name.as_str();
-            PRIMITIVES.iter().copied().find(|&p| p == name)
-        },
-        ast::TyKind::Ref(_, mut_ty) => primitive_name(&mut_ty.ty),
-        _ => None,
+trait TyExt {
+    /// WHY: only direct primitives at the field/param level are autofixable.
+    /// A `&str` field can't become `&MyType(str)` (unsized inner), and a
+    /// `&u32` field requires extra ceremony at every call site; leave those
+    /// to manual fixes.
+    fn direct_primitive(&self) -> Option<&'static str>;
+    fn primitive_name(&self) -> Option<&'static str>;
+}
+
+impl TyExt for ast::Ty {
+    fn direct_primitive(&self) -> Option<&'static str> {
+        match &self.kind {
+            ast::TyKind::Path(None, path)
+                if path.segments.len() == 1 && path.segments[0].args.is_none() =>
+            {
+                let name = path.segments[0].ident.name.as_str();
+                PRIMITIVES.iter().copied().find(|&p| p == name)
+            },
+            _ => None,
+        }
+    }
+
+    fn primitive_name(&self) -> Option<&'static str> {
+        match &self.kind {
+            ast::TyKind::Path(None, path)
+                if path.segments.len() == 1 && path.segments[0].args.is_none() =>
+            {
+                let name = path.segments[0].ident.name.as_str();
+                PRIMITIVES.iter().copied().find(|&p| p == name)
+            },
+            ast::TyKind::Ref(_, mut_ty) => mut_ty.ty.primitive_name(),
+            _ => None,
+        }
     }
 }
 
-// WHY: only direct primitives at the field/param level are autofixable.
-// A `&str` field can't become `&MyType(str)` (unsized inner), and a `&u32`
-// field requires extra ceremony at every call site; leave those to manual
-// fixes.
-fn direct_primitive(ty: &ast::Ty) -> Option<&'static str> {
-    match &ty.kind {
-        ast::TyKind::Path(None, path)
-            if path.segments.len() == 1 && path.segments[0].args.is_none() =>
-        {
-            let name = path.segments[0].ident.name.as_str();
-            PRIMITIVES.iter().copied().find(|&p| p == name)
-        },
-        _ => None,
+trait StrExt {
+    fn snake_to_pascal(&self) -> String;
+}
+
+impl StrExt for str {
+    fn snake_to_pascal(&self) -> String {
+        self.split('_')
+            .filter(|seg| !seg.is_empty())
+            .map(|seg| {
+                let mut chars = seg.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
+                }
+            })
+            .collect()
     }
 }
 
-#[allow(raw_primitive_param)]
-fn snake_to_pascal(s: &str) -> String {
-    s.split('_')
-        .filter(|seg| !seg.is_empty())
-        .map(|seg| {
-            let mut chars = seg.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
-            }
-        })
-        .collect()
+trait VisibilityExt {
+    fn snippet(&self, early_context: &EarlyContext<'_>) -> String;
 }
 
-fn visibility_snippet(early_context: &EarlyContext<'_>, visibility: &ast::Visibility) -> String {
-    match visibility.kind {
-        ast::VisibilityKind::Inherited => String::new(),
-        _ => early_context
-            .sess()
-            .source_map()
-            .span_to_snippet(visibility.span)
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(|s| format!("{s} "))
-            .unwrap_or_default(),
+impl VisibilityExt for ast::Visibility {
+    fn snippet(&self, early_context: &EarlyContext<'_>) -> String {
+        match self.kind {
+            ast::VisibilityKind::Inherited => String::new(),
+            _ => early_context
+                .sess()
+                .source_map()
+                .span_to_snippet(self.span)
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(|s| format!("{s} "))
+                .unwrap_or_default(),
+        }
     }
 }
 
@@ -90,15 +108,15 @@ impl EarlyLintPass for RawPrimitiveField {
             let Some(name) = field.ident else {
                 return;
             };
-            let Some(primitive) = primitive_name(&field.ty) else {
+            let Some(primitive) = field.ty.primitive_name() else {
                 return;
             };
             let msg = format!(
                 "field `{}` uses raw primitive `{primitive}` — wrap it in a newtype",
                 name.name
             );
-            let direct = direct_primitive(&field.ty);
-            let newtype_name = snake_to_pascal(name.name.as_str());
+            let direct = field.ty.direct_primitive();
+            let newtype_name = name.name.as_str().snake_to_pascal();
             early_context.opt_span_lint(RAW_PRIMITIVE_FIELD, Some(field.ty.span), |diag| {
                 diag.primary_message(msg);
                 // WHY: skip autofix for refs (handled by `direct` filter) and
@@ -109,7 +127,7 @@ impl EarlyLintPass for RawPrimitiveField {
                     true => None,
                 };
                 if let Some(primitive) = autofix_primitive {
-                    let visibility = visibility_snippet(early_context, &field.vis);
+                    let visibility = field.vis.snippet(early_context);
                     // WHY: inner-field visibility matches outer so callers
                     // that already construct the parent struct can still
                     // construct the newtype literal at the same site.
@@ -174,7 +192,7 @@ impl EarlyLintPass for RawPrimitiveParam {
             .iter()
             .filter(|param| !param.span.from_expansion() && !param.is_self())
             .for_each(|param| {
-                let Some(primitive) = primitive_name(&param.ty) else {
+                let Some(primitive) = param.ty.primitive_name() else {
                     return;
                 };
                 let name = match &param.pat.kind {
@@ -184,8 +202,8 @@ impl EarlyLintPass for RawPrimitiveParam {
                 let msg = format!(
                     "param `{name}` uses raw primitive `{primitive}` — wrap it in a newtype"
                 );
-                let direct = direct_primitive(&param.ty);
-                let newtype_name = snake_to_pascal(&name);
+                let direct = param.ty.direct_primitive();
+                let newtype_name = name.snake_to_pascal();
                 early_context.opt_span_lint(RAW_PRIMITIVE_PARAM, Some(param.span), |diag| {
                     diag.primary_message(msg);
                     let autofix_primitive = match autofix_allowed && !newtype_name.is_empty() {

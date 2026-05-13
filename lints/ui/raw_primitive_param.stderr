@@ -1,3 +1,13 @@
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/raw_primitive_param.rs:3:1
+   |
+LL | / pub fn bad(from: u64, to: u64, amount: f64) {
+LL | |     let _ = (from, to, amount);
+LL | | }
+   | |_^
+   |
+   = note: `#[deny(subject_first_param)]` on by default
+
 warning: param `from` uses raw primitive `u64` — wrap it in a newtype
   --> $DIR/raw_primitive_param.rs:3:12
    |
@@ -38,6 +48,22 @@ LL +
 LL ~ pub fn bad(from: u64, to: u64, amount: Amount) {
    |
 
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/raw_primitive_param.rs:7:1
+   |
+LL | / pub fn good(user_id: UserId) {
+LL | |     let _ = user_id;
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/raw_primitive_param.rs:11:1
+   |
+LL | / pub fn snake_case_name(retry_count: u32) {
+LL | |     let _ = retry_count;
+LL | | }
+   | |_^
+
 warning: param `retry_count` uses raw primitive `u32` — wrap it in a newtype
   --> $DIR/raw_primitive_param.rs:11:24
    |
@@ -51,11 +77,27 @@ LL +
 LL ~ pub fn snake_case_name(retry_count: RetryCount) {
    |
 
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/raw_primitive_param.rs:15:1
+   |
+LL | / pub fn ref_param(label: &str) {
+LL | |     let _ = label;
+LL | | }
+   | |_^
+
 warning: param `label` uses raw primitive `str` — wrap it in a newtype
   --> $DIR/raw_primitive_param.rs:15:18
    |
 LL | pub fn ref_param(label: &str) {
    |                  ^^^^^^^^^^^
+
+error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
+  --> $DIR/raw_primitive_param.rs:22:5
+   |
+LL | /     pub fn method(&self, count: u32) {
+LL | |         let _ = count;
+LL | |     }
+   | |_____^
 
 warning: param `count` uses raw primitive `u32` — wrap it in a newtype
   --> $DIR/raw_primitive_param.rs:22:26
@@ -63,5 +105,5 @@ warning: param `count` uses raw primitive `u32` — wrap it in a newtype
 LL |     pub fn method(&self, count: u32) {
    |                          ^^^^^^^^^^
 
-warning: 6 warnings emitted
+error: aborting due to 5 previous errors; 6 warnings emitted
 

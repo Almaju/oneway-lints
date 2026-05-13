@@ -29,38 +29,44 @@ struct ChainParts {
     has_let_cond: bool,
 }
 
-fn collect_chain(expr: &ast::Expr) -> ChainParts {
-    let mut arms = Vec::new();
-    let mut final_else = None;
-    let mut has_let_cond = false;
-    let mut current = expr;
-    loop {
-        let ast::ExprKind::If(cond, then_block, Some(else_expr)) = &current.kind else {
-            break;
-        };
-        if matches!(cond.kind, ast::ExprKind::Let(..)) {
-            has_let_cond = true;
-            break;
-        }
-        arms.push((cond.span, then_block.span));
-        match &else_expr.kind {
-            ast::ExprKind::If(..) => current = else_expr,
-            _ => {
-                final_else = Some(else_expr.span);
+// WHY: `From` trait impl rather than a free `fn collect_chain(expr)` —
+// the lint requires every fn to be `fn()`, `fn(self)`, or `fn(self, x)`.
+// A trait impl method (`from(value)`) is exempt because the signature is
+// dictated by the trait.
+impl From<&ast::Expr> for ChainParts {
+    fn from(expr: &ast::Expr) -> Self {
+        let mut arms = Vec::new();
+        let mut final_else = None;
+        let mut has_let_cond = false;
+        let mut current = expr;
+        loop {
+            let ast::ExprKind::If(cond, then_block, Some(else_expr)) = &current.kind else {
                 break;
-            },
+            };
+            if matches!(cond.kind, ast::ExprKind::Let(..)) {
+                has_let_cond = true;
+                break;
+            }
+            arms.push((cond.span, then_block.span));
+            match &else_expr.kind {
+                ast::ExprKind::If(..) => current = else_expr,
+                _ => {
+                    final_else = Some(else_expr.span);
+                    break;
+                },
+            }
         }
-    }
-    ChainParts {
-        arms,
-        final_else,
-        has_let_cond,
+        ChainParts {
+            arms,
+            final_else,
+            has_let_cond,
+        }
     }
 }
 
 impl IfElseVisitor<'_> {
     fn emit(&self, expr: &ast::Expr) {
-        let chain = collect_chain(expr);
+        let chain = ChainParts::from(expr);
         self.early_context
             .opt_span_lint(NO_IF_ELSE, Some(expr.span), |diag| {
                 diag.primary_message(

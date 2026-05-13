@@ -21,12 +21,18 @@ mod control_flow;
 mod functions;
 mod naming;
 mod organization;
+mod path_ext;
 mod primitives;
 mod sorting;
 mod style;
 
+// WHY: `register_lints` is the dylint plugin entry point. Its signature
+// (Session + LintStore) is fixed by the loader, so we can't reshape it as
+// a method or shrink the param list — carve it out from the `subject_first_param`
+// rule.
 #[doc(hidden)]
 #[no_mangle]
+#[allow(subject_first_param)]
 pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lint::LintStore) {
     lint_store.register_lints(&[
         sorting::UNSORTED_STRUCT_FIELDS,
@@ -46,9 +52,11 @@ pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lin
     lint_store.register_lints(&[
         functions::NO_NESTED_FUNCTIONS,
         functions::ONE_CONSTRUCTOR_NAME,
+        functions::SUBJECT_FIRST_PARAM,
     ]);
     lint_store.register_early_pass(|| Box::new(functions::NoNestedFunctions));
     lint_store.register_early_pass(|| Box::new(functions::OneConstructorName));
+    lint_store.register_early_pass(|| Box::new(functions::SubjectFirstParam::default()));
 
     lint_store.register_lints(&[control_flow::NO_IF_ELSE]);
     lint_store.register_early_pass(|| Box::new(control_flow::NoIfElse));

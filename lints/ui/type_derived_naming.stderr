@@ -83,6 +83,104 @@ LL ~     pub fn from_admin(admin_source: AdminSource) -> Self {
 LL ~         Self { source: admin_source }
    |
 
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:9:1
+   |
+LL | / pub fn good(user_id: UserId, database: Database) {
+LL | |     let _ = (user_id, database);
+LL | | }
+   | |_^
+   |
+   = note: `#[deny(subject_first_param)]` on by default
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:13:1
+   |
+LL | / pub fn good_with_prefix(sender_account_id: AccountId, receiver_account_id: AccountId) {
+LL | |     let _ = (sender_account_id, receiver_account_id);
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:17:1
+   |
+LL | / pub fn bad_param(id: UserId, db: Database) {
+LL | |     let _ = (id, db);
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:27:1
+   |
+LL | / pub fn unbound_generic_passes<T>(value: T) {
+LL | |     let _ = value;
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:31:1
+   |
+LL | / pub fn auto_trait_only_passes<T: Send + Sync>(value: T) {
+LL | |     let _ = value;
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:35:1
+   |
+LL | / pub fn single_bound_good<M: Migrator>(migrator: M) {
+LL | |     let _ = migrator;
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:39:1
+   |
+LL | / pub fn single_bound_bad<M: Migrator>(m: M) {
+LL | |     let _ = m;
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:43:1
+   |
+LL | / pub fn multi_bound_placeholder_bad<M: Migrator + Connector + Orchestrator>(m: M) {
+LL | |     let _ = m;
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:47:1
+   |
+LL | / pub fn multi_bound_role_named<Service: Migrator + Connector + Orchestrator>(service: Service) {
+LL | |     let _ = service;
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:51:1
+   |
+LL | / pub fn multi_bound_binding_mismatch<Service: Migrator + Connector>(thing: Service) {
+LL | |     let _ = thing;
+LL | | }
+   | |_^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:61:5
+   |
+LL | /     pub fn from_admin(source: AdminSource) -> Self {
+LL | |         Self { src: source }
+LL | |     }
+   | |_____^
+
+error: free function takes parameters — make it a method on a type so the subject is `self`
+  --> $DIR/type_derived_naming.rs:71:5
+   |
+LL | /     pub fn from_admin(source: AdminSource) -> Self {
+LL | |         Self { source }
+LL | |     }
+   | |_____^
+
 warning: second primary public type in this file — extract into its own file
   --> $DIR/type_derived_naming.rs:66:1
    |
@@ -93,5 +191,5 @@ LL | | }
    |
    = note: `#[warn(one_public_type_per_file)]` on by default
 
-error: aborting due to 8 previous errors; 1 warning emitted
+error: aborting due to 20 previous errors; 1 warning emitted
 

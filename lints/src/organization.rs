@@ -5,6 +5,8 @@ use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
 use rustc_session::{declare_lint, impl_lint_pass};
 use rustc_span::{FileName, Span};
 
+use crate::path_ext::PathExt;
+
 declare_lint! {
     /// **Warn** — each file should export at most one primary public type
     /// (named-field struct or enum). Tuple structs and unit structs are
@@ -21,29 +23,30 @@ pub struct OnePublicTypePerFile {
 
 impl_lint_pass!(OnePublicTypePerFile => [ONE_PUBLIC_TYPE_PER_FILE]);
 
-fn is_primary_pub_type(item: &ast::Item) -> bool {
-    let is_pub = matches!(
-        item.vis.kind,
-        ast::VisibilityKind::Public | ast::VisibilityKind::Restricted { .. }
-    );
-    if !is_pub {
-        return false;
-    }
-    match &item.kind {
-        ast::ItemKind::Enum(..) => true,
-        ast::ItemKind::Struct(_, _, vdata) => {
-            matches!(vdata, ast::VariantData::Struct { .. })
-        },
-        _ => false,
-    }
+trait ItemExt {
+    /// True when this item is a "primary" public type — a named-field
+    /// struct or an enum. Tuple structs, unit structs, and any non-public
+    /// item are treated as supporting cast.
+    fn is_primary_pub_type(&self) -> bool;
 }
 
-fn is_local_source_path(path: &std::path::Path) -> bool {
-    let s = path.to_string_lossy();
-    !s.contains("/.cargo/")
-        && !s.contains("/.rustup/")
-        && !s.contains("/rustlib/")
-        && !s.starts_with("<")
+impl ItemExt for ast::Item {
+    fn is_primary_pub_type(&self) -> bool {
+        let is_pub = matches!(
+            self.vis.kind,
+            ast::VisibilityKind::Public | ast::VisibilityKind::Restricted { .. }
+        );
+        if !is_pub {
+            return false;
+        }
+        match &self.kind {
+            ast::ItemKind::Enum(..) => true,
+            ast::ItemKind::Struct(_, _, vdata) => {
+                matches!(vdata, ast::VariantData::Struct { .. })
+            },
+            _ => false,
+        }
+    }
 }
 
 impl EarlyLintPass for OnePublicTypePerFile {
@@ -62,7 +65,7 @@ impl EarlyLintPass for OnePublicTypePerFile {
     }
 
     fn check_item(&mut self, early_context: &EarlyContext<'_>, item: &ast::Item) {
-        if item.span.from_expansion() || !is_primary_pub_type(item) {
+        if item.span.from_expansion() || !item.is_primary_pub_type() {
             return;
         }
         let source_map = early_context.sess().source_map();
@@ -71,7 +74,7 @@ impl EarlyLintPass for OnePublicTypePerFile {
             FileName::Real(real) => real.local_path_if_available().to_path_buf(),
             _ => return,
         };
-        if !is_local_source_path(&path) {
+        if !path.is_local_source() {
             return;
         }
         let key = path.to_string_lossy().into_owned();

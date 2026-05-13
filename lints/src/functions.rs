@@ -77,6 +77,133 @@ impl EarlyLintPass for NoNestedFunctions {
 }
 
 declare_lint! {
+    /// **Deny** — every function must take its subject as the first parameter
+    /// and have at most one additional param. The only allowed shapes are
+    /// `fn()`, `fn(self)`, and `fn(self, param)`. Free functions with
+    /// parameters aren't allowed — make them methods on a type, or wrap the
+    /// inputs into a single struct/newtype.
+    pub SUBJECT_FIRST_PARAM,
+    Deny,
+    "fns must be fn(), fn(self), or fn(self, param) — subject is always the first arg"
+}
+
+#[allow(raw_primitive_field)]
+#[derive(Default)]
+pub struct SubjectFirstParam {
+    in_trait_impl_depth: u32,
+}
+impl_lint_pass!(SubjectFirstParam => [SUBJECT_FIRST_PARAM]);
+
+trait BlockExt {
+    /// Returns true if any expression in this block (recursively) references
+    /// the `self` value (as opposed to the `Self` type).
+    fn uses_self(&self) -> bool;
+}
+
+impl BlockExt for ast::Block {
+    fn uses_self(&self) -> bool {
+        #[allow(raw_primitive_field)]
+        struct Finder {
+            found: bool,
+        }
+        impl<'ast> Visitor<'ast> for Finder {
+            fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+                if self.found {
+                    return;
+                }
+                if let ast::ExprKind::Path(_, path) = &expr.kind {
+                    if path
+                        .segments
+                        .first()
+                        .is_some_and(|s| s.ident.name.as_str() == "self")
+                    {
+                        self.found = true;
+                        return;
+                    }
+                }
+                visit::walk_expr(self, expr);
+            }
+        }
+        let mut finder = Finder { found: false };
+        visit::walk_block(&mut finder, self);
+        finder.found
+    }
+}
+
+impl EarlyLintPass for SubjectFirstParam {
+    fn check_fn(
+        &mut self,
+        early_context: &EarlyContext<'_>,
+        fn_kind: FnKind<'_>,
+        span: Span,
+        _id: NodeId,
+    ) {
+        if span.from_expansion() {
+            return;
+        }
+        let FnKind::Fn(fn_ctxt, _, fn_box) = fn_kind else {
+            return;
+        };
+        // WHY: foreign fns are FFI bindings whose signature is fixed by the
+        // C ABI on the other side. Trait impl methods are constrained by the
+        // trait declaration — flag the declaration once, not every impl.
+        if matches!(fn_ctxt, FnCtxt::Foreign) || self.in_trait_impl_depth > 0 {
+            return;
+        }
+        let inputs = &fn_box.sig.decl.inputs;
+        let has_self = inputs.first().is_some_and(|p| p.is_self());
+        let arity_issue = match (inputs.len(), has_self) {
+            (0, _) => None,
+            (1 | 2, true) => None,
+            (_, false) => Some(
+                "free function takes parameters — make it a method on a type so the subject is `self`",
+            ),
+            (_, true) => Some(
+                "method takes more than one non-self param — wrap the inputs in a struct or newtype",
+            ),
+        };
+        if let Some(msg) = arity_issue {
+            early_context.opt_span_lint(SUBJECT_FIRST_PARAM, Some(span), |diag| {
+                diag.primary_message(msg);
+            });
+            return;
+        }
+        // WHY: a method that declares `self` but never references it in the
+        // body is in the wrong place. The "subject" of the operation is
+        // whatever IS referenced in the body — usually a parameter or a
+        // foreign type. Move the method to an extension trait on that
+        // type instead.
+        if has_self {
+            if let Some(body) = fn_box.body.as_ref() {
+                if !body.uses_self() {
+                    early_context.opt_span_lint(SUBJECT_FIRST_PARAM, Some(span), |diag| {
+                        diag.primary_message(
+                            "method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn",
+                        );
+                    });
+                }
+            }
+        }
+    }
+
+    fn check_item(&mut self, _early_context: &EarlyContext<'_>, item: &ast::Item) {
+        if let ast::ItemKind::Impl(impl_block) = &item.kind {
+            if impl_block.of_trait.is_some() {
+                self.in_trait_impl_depth += 1;
+            }
+        }
+    }
+
+    fn check_item_post(&mut self, _early_context: &EarlyContext<'_>, item: &ast::Item) {
+        if let ast::ItemKind::Impl(impl_block) = &item.kind {
+            if impl_block.of_trait.is_some() {
+                self.in_trait_impl_depth = self.in_trait_impl_depth.saturating_sub(1);
+            }
+        }
+    }
+}
+
+declare_lint! {
     /// **Deny** — constructors must not use near-synonyms for `new` such as
     /// `create`, `build`, `init`, `make`, or `construct`. Other descriptive
     /// constructor names (`from_string`, `with_capacity`, role-discriminating
@@ -91,18 +218,38 @@ impl_lint_pass!(OneConstructorName => [ONE_CONSTRUCTOR_NAME]);
 
 const FORBIDDEN_NAMES: &[&str] = &["build", "construct", "create", "init", "make"];
 
-fn returns_self(early_context: &EarlyContext<'_>, fn_decl: &ast::FnDecl) -> bool {
-    let ast::FnRetTy::Ty(ref ty) = fn_decl.output else {
-        return false;
-    };
-    let Ok(snippet) = early_context.sess().source_map().span_to_snippet(ty.span) else {
-        return false;
-    };
-    snippet.trim() == "Self"
+trait FnDeclExt {
+    fn has_self_receiver(&self) -> bool;
+    fn returns_self(&self, early_context: &EarlyContext<'_>) -> bool;
 }
 
-fn has_self_receiver(fn_decl: &ast::FnDecl) -> bool {
-    fn_decl.inputs.first().is_some_and(|p| p.is_self())
+impl FnDeclExt for ast::FnDecl {
+    fn has_self_receiver(&self) -> bool {
+        self.inputs.first().is_some_and(|p| p.is_self())
+    }
+
+    fn returns_self(&self, early_context: &EarlyContext<'_>) -> bool {
+        let ast::FnRetTy::Ty(ref ty) = self.output else {
+            return false;
+        };
+        let Ok(snippet) = early_context.sess().source_map().span_to_snippet(ty.span) else {
+            return false;
+        };
+        snippet.trim() == "Self"
+    }
+}
+
+trait TyExt {
+    fn simple_name(&self) -> Option<String>;
+}
+
+impl TyExt for ast::Ty {
+    fn simple_name(&self) -> Option<String> {
+        match &self.kind {
+            ast::TyKind::Path(_, path) => path.segments.last().map(|s| s.ident.name.to_string()),
+            _ => None,
+        }
+    }
 }
 
 struct Candidate {
@@ -113,38 +260,36 @@ struct Candidate {
     type_name: String,
 }
 
-fn self_ty_name(ty: &ast::Ty) -> Option<String> {
-    match &ty.kind {
-        ast::TyKind::Path(_, path) => path.segments.last().map(|s| s.ident.name.to_string()),
-        _ => None,
-    }
-}
-
 struct CandidateScanner<'cx> {
     by_type: HashMap<String, Vec<Candidate>>,
     early_context: &'cx EarlyContext<'cx>,
     existing_new_by_type: HashMap<String, bool>,
 }
 
-impl<'cx> CandidateScanner<'cx> {
+impl<'cx> From<&'cx EarlyContext<'cx>> for CandidateScanner<'cx> {
+    fn from(early_context: &'cx EarlyContext<'cx>) -> Self {
+        CandidateScanner {
+            by_type: HashMap::new(),
+            early_context,
+            existing_new_by_type: HashMap::new(),
+        }
+    }
+}
+
+impl CandidateScanner<'_> {
     /// Walk every `impl` block and collect renameable constructors. A
     /// `(type_name, method_name)` pair is autofixable when:
     ///   - exactly one method on `type_name` carries a forbidden name
     ///   - `type_name` has no method already called `new` (would collide)
-    fn collect(early_context: &'cx EarlyContext<'cx>, crate_root: &ast::Crate) -> Vec<Candidate> {
-        let mut scanner = CandidateScanner {
-            by_type: HashMap::new(),
-            early_context,
-            existing_new_by_type: HashMap::new(),
-        };
+    fn collect(mut self, crate_root: &ast::Crate) -> Vec<Candidate> {
         crate_root.items.iter().for_each(|item| {
-            scanner.scan(item);
+            self.scan(item);
         });
         let CandidateScanner {
             by_type,
             existing_new_by_type,
             ..
-        } = scanner;
+        } = self;
         let mut out: Vec<Candidate> = by_type
             .into_iter()
             .flat_map(|(type_name, mut entries)| {
@@ -178,17 +323,17 @@ impl<'cx> CandidateScanner<'cx> {
     }
 
     fn scan_impl(&mut self, impl_block: &ast::Impl) {
-        let Some(type_name) = self_ty_name(&impl_block.self_ty) else {
+        let Some(type_name) = impl_block.self_ty.simple_name() else {
             return;
         };
         impl_block.items.iter().for_each(|assoc| {
             let ast::AssocItemKind::Fn(fn_box) = &assoc.kind else {
                 return;
             };
-            if has_self_receiver(&fn_box.sig.decl) {
+            if fn_box.sig.decl.has_self_receiver() {
                 return;
             }
-            if !returns_self(self.early_context, &fn_box.sig.decl) {
+            if !fn_box.sig.decl.returns_self(self.early_context) {
                 return;
             }
             let method_name = fn_box.ident.name.to_string();
@@ -247,7 +392,7 @@ impl<'ast> Visitor<'ast> for CallSiteVisitor<'_> {
 
 impl EarlyLintPass for OneConstructorName {
     fn check_crate(&mut self, early_context: &EarlyContext<'_>, crate_root: &ast::Crate) {
-        let candidates = CandidateScanner::collect(early_context, crate_root);
+        let candidates = CandidateScanner::from(early_context).collect(crate_root);
         if candidates.is_empty() {
             return;
         }
