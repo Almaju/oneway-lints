@@ -29,11 +29,11 @@ struct ChainParts {
     has_let_cond: bool,
 }
 
-fn collect_chain(outer_if: &ast::Expr) -> ChainParts {
+fn collect_chain(expr: &ast::Expr) -> ChainParts {
     let mut arms = Vec::new();
     let mut final_else = None;
     let mut has_let_cond = false;
-    let mut current = outer_if;
+    let mut current = expr;
     loop {
         let ast::ExprKind::If(cond, then_block, Some(else_expr)) = &current.kind else {
             break;
@@ -59,10 +59,10 @@ fn collect_chain(outer_if: &ast::Expr) -> ChainParts {
 }
 
 impl IfElseVisitor<'_> {
-    fn emit(&self, outer_if: &ast::Expr) {
-        let chain = collect_chain(outer_if);
+    fn emit(&self, expr: &ast::Expr) {
+        let chain = collect_chain(expr);
         self.early_context
-            .opt_span_lint(NO_IF_ELSE, Some(outer_if.span), |diag| {
+            .opt_span_lint(NO_IF_ELSE, Some(expr.span), |diag| {
                 diag.primary_message(
                     "`if`/`else` chain — prefer `match` for exhaustive case analysis",
                 );
@@ -94,7 +94,7 @@ impl IfElseVisitor<'_> {
                 });
                 replacement.push_str(&format!("    _ => {else_text},\n}}"));
                 diag.span_suggestion(
-                    outer_if.span,
+                    expr.span,
                     "rewrite as `match`",
                     replacement,
                     Applicability::MachineApplicable,
@@ -111,11 +111,11 @@ impl<'ast> Visitor<'ast> for IfElseVisitor<'_> {
             if !expr.span.from_expansion() && !cond_is_let && !was_in_chain {
                 self.emit(expr);
             }
-            // Cond and then-block start fresh chains for any nested ifs.
+            // WHY: cond and then-block start fresh chains for any nested ifs.
             self.in_else_if = false;
             self.visit_expr(cond);
             self.visit_block(then_block);
-            // Only the `else if` continuation propagates chain context.
+            // WHY: only the `else if` continuation propagates chain context.
             self.in_else_if = matches!(else_expr.kind, ast::ExprKind::If(..));
             self.visit_expr(else_expr);
             self.in_else_if = was_in_chain;

@@ -120,81 +120,96 @@ fn self_ty_name(ty: &ast::Ty) -> Option<String> {
     }
 }
 
-/// Walk every `impl` block and collect renameable constructors. A
-/// `(type_name, method_name)` pair is autofixable when:
-///   - exactly one method on `type_name` carries a forbidden constructor name
-///   - `type_name` has no method already called `new` (would collide)
-fn collect_candidates(
-    early_context: &EarlyContext<'_>,
-    crate_root: &ast::Crate,
-) -> Vec<Candidate> {
-    let mut by_type: HashMap<String, Vec<Candidate>> = HashMap::new();
-    let mut existing_new_by_type: HashMap<String, bool> = HashMap::new();
-    crate_root.items.iter().for_each(|item| {
-        scan_item(early_context, item, &mut by_type, &mut existing_new_by_type);
-    });
-    let mut out: Vec<Candidate> = by_type
-        .into_iter()
-        .flat_map(|(type_name, mut entries)| {
-            let has_new = existing_new_by_type.get(&type_name).copied().unwrap_or(false);
-            let autofixable = !has_new && entries.len() == 1;
-            entries.iter_mut().for_each(|c| c.autofixable = autofixable);
-            entries
-        })
-        .collect();
-    // WHY: HashMap iteration order is non-deterministic; sort by source
-    // position so the diagnostic stream (and the UI test stderr) is stable.
-    out.sort_by_key(|c| c.diag_span.lo());
-    out
+struct CandidateScanner<'cx> {
+    by_type: HashMap<String, Vec<Candidate>>,
+    early_context: &'cx EarlyContext<'cx>,
+    existing_new_by_type: HashMap<String, bool>,
 }
 
-fn scan_item(
-    early_context: &EarlyContext<'_>,
-    item: &ast::Item,
-    by_type: &mut HashMap<String, Vec<Candidate>>,
-    existing_new_by_type: &mut HashMap<String, bool>,
-) {
-    match &item.kind {
-        ast::ItemKind::Impl(impl_block) if impl_block.of_trait.is_none() => {
-            if item.span.from_expansion() {
-                return;
-            }
-            let Some(type_name) = self_ty_name(&impl_block.self_ty) else {
+impl<'cx> CandidateScanner<'cx> {
+    /// Walk every `impl` block and collect renameable constructors. A
+    /// `(type_name, method_name)` pair is autofixable when:
+    ///   - exactly one method on `type_name` carries a forbidden name
+    ///   - `type_name` has no method already called `new` (would collide)
+    fn collect(early_context: &'cx EarlyContext<'cx>, crate_root: &ast::Crate) -> Vec<Candidate> {
+        let mut scanner = CandidateScanner {
+            by_type: HashMap::new(),
+            early_context,
+            existing_new_by_type: HashMap::new(),
+        };
+        crate_root.items.iter().for_each(|item| {
+            scanner.scan(item);
+        });
+        let CandidateScanner {
+            by_type,
+            existing_new_by_type,
+            ..
+        } = scanner;
+        let mut out: Vec<Candidate> = by_type
+            .into_iter()
+            .flat_map(|(type_name, mut entries)| {
+                let has_new = existing_new_by_type
+                    .get(&type_name)
+                    .copied()
+                    .unwrap_or(false);
+                let autofixable = !has_new && entries.len() == 1;
+                entries.iter_mut().for_each(|c| c.autofixable = autofixable);
+                entries
+            })
+            .collect();
+        // WHY: HashMap iteration order is non-deterministic; sort by source
+        // position so the diagnostic stream (and UI test stderr) stays stable.
+        out.sort_by_key(|c| c.diag_span.lo());
+        out
+    }
+
+    fn scan(&mut self, item: &ast::Item) {
+        match &item.kind {
+            ast::ItemKind::Impl(impl_block)
+                if impl_block.of_trait.is_none() && !item.span.from_expansion() =>
+            {
+                self.scan_impl(impl_block);
+            },
+            ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(items, ..)) => {
+                items.iter().for_each(|child| self.scan(child));
+            },
+            _ => {},
+        }
+    }
+
+    fn scan_impl(&mut self, impl_block: &ast::Impl) {
+        let Some(type_name) = self_ty_name(&impl_block.self_ty) else {
+            return;
+        };
+        impl_block.items.iter().for_each(|assoc| {
+            let ast::AssocItemKind::Fn(fn_box) = &assoc.kind else {
                 return;
             };
-            impl_block.items.iter().for_each(|assoc| {
-                let ast::AssocItemKind::Fn(fn_box) = &assoc.kind else {
-                    return;
-                };
-                if has_self_receiver(&fn_box.sig.decl) {
-                    return;
-                }
-                if !returns_self(early_context, &fn_box.sig.decl) {
-                    return;
-                }
-                let method_name = fn_box.ident.name.to_string();
-                if method_name == "new" {
-                    existing_new_by_type.insert(type_name.clone(), true);
-                    return;
-                }
-                if !FORBIDDEN_NAMES.contains(&method_name.as_str()) {
-                    return;
-                }
-                by_type.entry(type_name.clone()).or_default().push(Candidate {
+            if has_self_receiver(&fn_box.sig.decl) {
+                return;
+            }
+            if !returns_self(self.early_context, &fn_box.sig.decl) {
+                return;
+            }
+            let method_name = fn_box.ident.name.to_string();
+            if method_name == "new" {
+                self.existing_new_by_type.insert(type_name.clone(), true);
+                return;
+            }
+            if !FORBIDDEN_NAMES.contains(&method_name.as_str()) {
+                return;
+            }
+            self.by_type
+                .entry(type_name.clone())
+                .or_default()
+                .push(Candidate {
                     autofixable: false,
                     diag_span: assoc.span,
                     ident_span: fn_box.ident.span,
                     method_name,
                     type_name: type_name.clone(),
                 });
-            });
-        },
-        ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(items, ..)) => {
-            items.iter().for_each(|child| {
-                scan_item(early_context, child, by_type, existing_new_by_type);
-            });
-        },
-        _ => {},
+        });
     }
 }
 
@@ -232,7 +247,7 @@ impl<'ast> Visitor<'ast> for CallSiteVisitor<'_> {
 
 impl EarlyLintPass for OneConstructorName {
     fn check_crate(&mut self, early_context: &EarlyContext<'_>, crate_root: &ast::Crate) {
-        let candidates = collect_candidates(early_context, crate_root);
+        let candidates = CandidateScanner::collect(early_context, crate_root);
         if candidates.is_empty() {
             return;
         }

@@ -54,13 +54,13 @@ fn snake_to_pascal(s: &str) -> String {
         .collect()
 }
 
-fn visibility_snippet(early_context: &EarlyContext<'_>, vis: &ast::Visibility) -> String {
-    match vis.kind {
+fn visibility_snippet(early_context: &EarlyContext<'_>, visibility: &ast::Visibility) -> String {
+    match visibility.kind {
         ast::VisibilityKind::Inherited => String::new(),
         _ => early_context
             .sess()
             .source_map()
-            .span_to_snippet(vis.span)
+            .span_to_snippet(visibility.span)
             .ok()
             .filter(|s| !s.is_empty())
             .map(|s| format!("{s} "))
@@ -109,12 +109,14 @@ impl EarlyLintPass for RawPrimitiveField {
                     true => None,
                 };
                 if let Some(primitive) = autofix_primitive {
-                    let vis = visibility_snippet(early_context, &field.vis);
+                    let visibility = visibility_snippet(early_context, &field.vis);
                     // WHY: inner-field visibility matches outer so callers
                     // that already construct the parent struct can still
                     // construct the newtype literal at the same site.
-                    let inner_vis = vis.clone();
-                    let decl = format!("\n\n{vis}struct {newtype_name}({inner_vis}{primitive});");
+                    let inner_visibility = visibility.clone();
+                    let decl = format!(
+                        "\n\n{visibility}struct {newtype_name}({inner_visibility}{primitive});"
+                    );
                     // WHY: insert AFTER the parent struct's closing brace so
                     // any preceding `#[derive(...)]` keeps applying only to
                     // the parent — inserting BEFORE the parent would let the
