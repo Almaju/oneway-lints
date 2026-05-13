@@ -106,11 +106,11 @@ fn has_self_receiver(fn_decl: &ast::FnDecl) -> bool {
 }
 
 struct Candidate {
+    autofixable: bool,
     diag_span: Span,
     ident_span: Span,
     method_name: String,
     type_name: String,
-    autofixable: bool,
 }
 
 fn self_ty_name(ty: &ast::Ty) -> Option<String> {
@@ -155,11 +155,6 @@ fn scan_item(
     existing_new_by_type: &mut HashMap<String, bool>,
 ) {
     match &item.kind {
-        ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(items, ..)) => {
-            items.iter().for_each(|child| {
-                scan_item(early_context, child, by_type, existing_new_by_type);
-            });
-        },
         ast::ItemKind::Impl(impl_block) if impl_block.of_trait.is_none() => {
             if item.span.from_expansion() {
                 return;
@@ -186,12 +181,17 @@ fn scan_item(
                     return;
                 }
                 by_type.entry(type_name.clone()).or_default().push(Candidate {
+                    autofixable: false,
                     diag_span: assoc.span,
                     ident_span: fn_box.ident.span,
                     method_name,
                     type_name: type_name.clone(),
-                    autofixable: false,
                 });
+            });
+        },
+        ast::ItemKind::Mod(_, _, ast::ModKind::Loaded(items, ..)) => {
+            items.iter().for_each(|child| {
+                scan_item(early_context, child, by_type, existing_new_by_type);
             });
         },
         _ => {},
@@ -204,8 +204,8 @@ fn scan_item(
 /// methods with a `self` receiver, so all renameable constructors are
 /// reached via the `Type::method` path form.
 struct CallSiteVisitor<'a> {
-    interest: &'a HashMap<(String, String), ()>,
     hits: HashMap<(String, String), Vec<Span>>,
+    interest: &'a HashMap<(String, String), ()>,
 }
 
 impl<'ast> Visitor<'ast> for CallSiteVisitor<'_> {
@@ -242,8 +242,8 @@ impl EarlyLintPass for OneConstructorName {
             .map(|c| ((c.type_name.clone(), c.method_name.clone()), ()))
             .collect();
         let mut call_visitor = CallSiteVisitor {
-            interest: &interest,
             hits: HashMap::new(),
+            interest: &interest,
         };
         visit::walk_crate(&mut call_visitor, crate_root);
         candidates.into_iter().for_each(|candidate| {

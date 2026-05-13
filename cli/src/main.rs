@@ -288,7 +288,10 @@ fn collect_extract_targets(lint_opts: &LintOpts<'_>) -> io::Result<Vec<ExtractTa
     // invocation, which is where `--message-format` is parsed.
     command.arg("--").arg("--message-format=json");
     announce(&command);
-    let output = command.stdout(Stdio::piped()).stderr(Stdio::inherit()).output()?;
+    let output = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .output()?;
     let mut targets = Vec::new();
     output.stdout.split(|&b| b == b'\n').for_each(|line| {
         if line.is_empty() {
@@ -300,7 +303,9 @@ fn collect_extract_targets(lint_opts: &LintOpts<'_>) -> io::Result<Vec<ExtractTa
         if value.get("reason").and_then(Value::as_str) != Some("compiler-message") {
             return;
         }
-        let Some(message) = value.get("message") else { return };
+        let Some(message) = value.get("message") else {
+            return;
+        };
         let code = message
             .get("code")
             .and_then(|c| c.get("code"))
@@ -366,8 +371,7 @@ fn apply_extractions(file: &Path, targets: Vec<ExtractTarget>) -> io::Result<()>
         let Some(brace_open) = source[decl_start..].find('{') else {
             return Ok(());
         };
-        let Some(brace_close_rel) = find_matching_brace(&source[decl_start + brace_open..])
-        else {
+        let Some(brace_close_rel) = find_matching_brace(&source[decl_start + brace_open..]) else {
             return Ok(());
         };
         let extract_hi = decl_start + brace_open + brace_close_rel + 1;
@@ -389,13 +393,10 @@ fn apply_extractions(file: &Path, targets: Vec<ExtractTarget>) -> io::Result<()>
         let extracted = source[extract_lo..extract_hi].trim_start().to_string();
         let extracted = format!("{}\n", extracted.trim_end());
         fs::write(&dest, &extracted)?;
-        eprintln!(
-            "cargo-oneway: extracted {type_name} → {}",
-            dest.display()
-        );
+        eprintln!("cargo-oneway: extracted {type_name} → {}", dest.display());
         let prelude_vis = match vis.is_empty() {
-            true => "pub".to_string(),
             false => vis.trim_end().to_string(),
+            true => "pub".to_string(),
         };
         // WHY: emit mods and uses to separate buckets so the final prelude
         // reads `mod a; mod b; \n use a::A; use b::B;`. Interleaving them
@@ -434,7 +435,9 @@ fn prelude_insert_position(source: &str) -> usize {
     let mut byte = 0;
     let mut lines = source.lines();
     loop {
-        let Some(line) = lines.next() else { return source.len() };
+        let Some(line) = lines.next() else {
+            return source.len();
+        };
         let trimmed = line.trim_start();
         let advance = || byte + line.len() + 1;
         if trimmed.is_empty()
@@ -478,14 +481,14 @@ fn extend_backward(bytes: &[u8], pos: usize) -> usize {
         if q == 0 || bytes[q - 1] != b']' {
             return probe;
         }
-        // Scan backward for matching `[`, then check for `#` in front.
+        // NOTE: scan backward for matching `[`, then check for `#` in front.
         let mut depth = 1i32;
         let mut r = q - 1;
         while r > 0 && depth > 0 {
             r -= 1;
             match bytes[r] {
-                b']' => depth += 1,
                 b'[' => depth -= 1,
+                b']' => depth += 1,
                 _ => {},
             }
         }
@@ -568,10 +571,7 @@ fn pascal_to_snake(s: &str) -> String {
 /// file. For `lib.rs` / `main.rs` siblings live in the same directory; for
 /// any other parent the extracted file goes inside `<parent_stem>/`.
 fn destination_path(parent: &Path, mod_name: &str) -> PathBuf {
-    let stem = parent
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let stem = parent.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let dir = parent.parent().unwrap_or_else(|| Path::new("."));
     match stem {
         "lib" | "main" => dir.join(format!("{mod_name}.rs")),

@@ -105,8 +105,8 @@ impl EarlyLintPass for RawPrimitiveField {
                 // for degenerate field names that would produce an empty
                 // newtype identifier (e.g. a field literally named `_`).
                 let autofix_primitive = match newtype_name.is_empty() {
-                    true => None,
                     false => direct,
+                    true => None,
                 };
                 if let Some(primitive) = autofix_primitive {
                     let vis = visibility_snippet(early_context, &field.vis);
