@@ -51,18 +51,18 @@ All sorting rules are autofixable via `cargo oneway lint --fix` (with safe exemp
 
 ## Function Discipline
 
-| Lint | Severity | Tool | One-liner |
-|------|----------|------|-----------|
-| [`too_many_params`](docs/too_many_params.md) | deny | `clippy::too_many_arguments` (threshold = 2) | Max 2 params: self + one input |
-| [`no_nested_functions`](docs/no_nested_functions.md) | warn | dylint | Extract inner functions to module level |
-| [`one_constructor_name`](docs/one_constructor_name.md) | deny | dylint | Constructors must be called `new` |
+| Lint | Severity | Tool | Autofix | One-liner |
+|------|----------|------|---------|-----------|
+| [`too_many_params`](docs/too_many_params.md) | deny | `clippy::too_many_arguments` (threshold = 2) | — | Max 2 params: self + one input |
+| [`no_nested_functions`](docs/no_nested_functions.md) | warn | dylint | ✓ for free fns (hoisted right after the outer); not for impl methods | Extract inner functions to module level |
+| [`one_constructor_name`](docs/one_constructor_name.md) | deny | dylint | ✓ when the type has exactly one forbidden constructor and no existing `new` — renames the fn and all `Type::name` call sites in the crate | Constructors must be called `new` |
 
 ## Newtype Discipline
 
-| Lint | Severity | Tool | One-liner |
-|------|----------|------|-----------|
-| [`raw_primitive_field`](docs/raw_primitive_field.md) | warn | dylint | Use newtypes for struct fields |
-| [`raw_primitive_param`](docs/raw_primitive_param.md) | warn | dylint | Use newtypes for function params |
+| Lint | Severity | Tool | Autofix | One-liner |
+|------|----------|------|---------|-----------|
+| [`raw_primitive_field`](docs/raw_primitive_field.md) | warn | dylint | ✓ for direct primitives (not refs); call sites must wrap values manually | Use newtypes for struct fields |
+| [`raw_primitive_param`](docs/raw_primitive_param.md) | warn | dylint | ✓ for free fns with direct primitives (not refs, not impl methods); body and call sites must be updated manually | Use newtypes for function params |
 
 ## Error Handling
 
@@ -73,9 +73,9 @@ All sorting rules are autofixable via `cargo oneway lint --fix` (with safe exemp
 
 ## Control Flow
 
-| Lint | Severity | Tool | One-liner |
-|------|----------|------|-----------|
-| [`no_if_else`](docs/no_if_else.md) | warn | dylint | Use `match` instead of `if`/`else` chains |
+| Lint | Severity | Tool | Autofix | One-liner |
+|------|----------|------|---------|-----------|
+| [`no_if_else`](docs/no_if_else.md) | warn | dylint | ✓ rewrites the chain as `match () { _ if cond => block, ..., _ => else_block }`; one warning per chain (not one per `else if`) | Use `match` instead of `if`/`else` chains |
 
 ## Return Style
 
@@ -91,9 +91,9 @@ All sorting rules are autofixable via `cargo oneway lint --fix` (with safe exemp
 
 ## Module Organization
 
-| Lint | Severity | Tool | One-liner |
-|------|----------|------|-----------|
-| [`one_public_type_per_file`](docs/one_public_type_per_file.md) | warn | dylint | One primary pub type per file |
+| Lint | Severity | Tool | Autofix | One-liner |
+|------|----------|------|---------|-----------|
+| [`one_public_type_per_file`](docs/one_public_type_per_file.md) | warn | dylint | ✓ via `cargo oneway lint --fix` — extracts each extra type to its own file and rewires the parent (`pub mod` + `pub use`) | One primary pub type per file |
 
 ## Architecture
 

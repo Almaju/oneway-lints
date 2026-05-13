@@ -5,6 +5,12 @@ LL | fn classify(n: i32) -> &'static str {
    |             ^^^^^^
    |
    = note: `#[warn(raw_primitive_param)]` on by default
+help: introduce a newtype (body uses of the param and call sites will need updating)
+   |
+LL + struct N(i32);
+LL + 
+LL ~ fn classify(n: N) -> &'static str {
+   |
 
 error: match arm `1` should come before `2` (alphabetical order required)
   --> $DIR/unsorted_match_arms.rs:4:9

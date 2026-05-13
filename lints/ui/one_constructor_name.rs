@@ -17,6 +17,17 @@ impl Db {
     }
 }
 
+pub struct Cache;
+
+impl Cache {
+    pub fn build() -> Self {
+        Self
+    }
+    pub fn construct() -> Self {
+        Self
+    }
+}
+
 pub struct WithRef;
 
 impl WithRef {
@@ -40,6 +51,8 @@ fn main() {
     let _ = Server::new();
     let _ = Server::create();
     let _ = Db::init();
+    let _ = Cache::build();
+    let _ = Cache::construct();
     let _ = WithRef.allowed_method();
     let _ = UserId::new();
     let _ = UserId::from_string();

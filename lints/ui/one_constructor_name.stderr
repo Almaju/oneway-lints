@@ -1,3 +1,46 @@
+error: constructor `create` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
+  --> $DIR/one_constructor_name.rs:7:5
+   |
+LL | /     pub fn create() -> Self {
+LL | |         Self
+LL | |     }
+   | |_____^
+   |
+   = note: `#[deny(one_constructor_name)]` on by default
+
+error: constructor `init` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
+  --> $DIR/one_constructor_name.rs:15:5
+   |
+LL | /     pub fn init() -> Self {
+LL | |         Self
+LL | |     }
+   | |_____^
+   |
+help: rename the constructor (and its call sites) to `new`
+   |
+LL ~     pub fn new() -> Self {
+LL |         Self
+...
+LL |     let _ = Server::create();
+LL ~     let _ = Db::new();
+   |
+
+error: constructor `build` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
+  --> $DIR/one_constructor_name.rs:23:5
+   |
+LL | /     pub fn build() -> Self {
+LL | |         Self
+LL | |     }
+   | |_____^
+
+error: constructor `construct` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
+  --> $DIR/one_constructor_name.rs:26:5
+   |
+LL | /     pub fn construct() -> Self {
+LL | |         Self
+LL | |     }
+   | |_____^
+
 error: static method `create` should come before `new` (alphabetical within group)
   --> $DIR/one_constructor_name.rs:4:5
    |
@@ -17,23 +60,5 @@ LL +         Self
 LL +     }
    |
 
-error: constructor `create` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
-  --> $DIR/one_constructor_name.rs:7:5
-   |
-LL | /     pub fn create() -> Self {
-LL | |         Self
-LL | |     }
-   | |_____^
-   |
-   = note: `#[deny(one_constructor_name)]` on by default
-
-error: constructor `init` is a synonym for `new` — rename to `new` or use a descriptive name (e.g. `from_string`, `with_capacity`)
-  --> $DIR/one_constructor_name.rs:15:5
-   |
-LL | /     pub fn init() -> Self {
-LL | |         Self
-LL | |     }
-   | |_____^
-
-error: aborting due to 3 previous errors
+error: aborting due to 5 previous errors
 

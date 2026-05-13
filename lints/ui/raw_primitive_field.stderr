@@ -5,12 +5,77 @@ LL |     pub age: u32,
    |              ^^^
    |
    = note: `#[warn(raw_primitive_field)]` on by default
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     pub age: Age,
+LL |     pub name: String,
+LL ~ }
+LL + 
+LL + pub struct Age(pub u32);
+   |
 
 warning: field `name` uses raw primitive `String` — wrap it in a newtype
   --> $DIR/raw_primitive_field.rs:5:15
    |
 LL |     pub name: String,
    |               ^^^^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     pub name: Name,
+LL ~ }
+LL + 
+LL + pub struct Name(pub String);
+   |
+
+warning: field `created_at` uses raw primitive `u64` — wrap it in a newtype
+  --> $DIR/raw_primitive_field.rs:16:21
+   |
+LL |     pub created_at: u64,
+   |                     ^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     pub created_at: CreatedAt,
+LL |     retry_count: u32,
+LL ~ }
+LL + 
+LL + pub struct CreatedAt(pub u64);
+   |
+
+warning: field `retry_count` uses raw primitive `u32` — wrap it in a newtype
+  --> $DIR/raw_primitive_field.rs:17:18
+   |
+LL |     retry_count: u32,
+   |                  ^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     retry_count: RetryCount,
+LL ~ }
+LL + 
+LL + struct RetryCount(u32);
+   |
+
+warning: field `session_id` uses raw primitive `u64` — wrap it in a newtype
+  --> $DIR/raw_primitive_field.rs:22:21
+   |
+LL |     pub session_id: u64,
+   |                     ^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     pub session_id: SessionId,
+LL ~ }
+LL + 
+LL + pub struct SessionId(pub u64);
+   |
+
+warning: field `label` uses raw primitive `str` — wrap it in a newtype
+  --> $DIR/raw_primitive_field.rs:26:16
+   |
+LL |     pub label: &'a str,
+   |                ^^^^^^^
 
 warning: second primary public type in this file — extract into its own file
   --> $DIR/raw_primitive_field.rs:8:1
@@ -23,5 +88,21 @@ LL | | }
    |
    = note: `#[warn(one_public_type_per_file)]` on by default
 
-warning: 3 warnings emitted
+warning: second primary public type in this file — extract into its own file
+  --> $DIR/raw_primitive_field.rs:21:1
+   |
+LL | / pub struct WithDerive {
+LL | |     pub session_id: u64,
+LL | | }
+   | |_^
+
+warning: second primary public type in this file — extract into its own file
+  --> $DIR/raw_primitive_field.rs:25:1
+   |
+LL | / pub struct WithRef<'a> {
+LL | |     pub label: &'a str,
+LL | | }
+   | |_^
+
+warning: 9 warnings emitted
 

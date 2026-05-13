@@ -13,6 +13,13 @@ LL |     pub name: String,
    |               ^^^^^^
    |
    = note: `#[warn(raw_primitive_field)]` on by default
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     pub name: Name,
+LL ~ }
+LL + 
+LL + pub struct Name(pub String);
+   |
 
 error: aborting due to 1 previous error; 1 warning emitted
 

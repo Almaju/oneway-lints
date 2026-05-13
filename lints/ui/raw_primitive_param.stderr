@@ -5,18 +5,63 @@ LL | pub fn bad(from: u64, to: u64, amount: f64) {
    |            ^^^^^^^^^
    |
    = note: `#[warn(raw_primitive_param)]` on by default
+help: introduce a newtype (body uses of the param and call sites will need updating)
+   |
+LL + struct From(u64);
+LL + 
+LL ~ pub fn bad(from: From, to: u64, amount: f64) {
+   |
 
 warning: param `to` uses raw primitive `u64` — wrap it in a newtype
   --> $DIR/raw_primitive_param.rs:3:23
    |
 LL | pub fn bad(from: u64, to: u64, amount: f64) {
    |                       ^^^^^^^
+   |
+help: introduce a newtype (body uses of the param and call sites will need updating)
+   |
+LL + struct To(u64);
+LL + 
+LL ~ pub fn bad(from: u64, to: To, amount: f64) {
+   |
 
 warning: param `amount` uses raw primitive `f64` — wrap it in a newtype
   --> $DIR/raw_primitive_param.rs:3:32
    |
 LL | pub fn bad(from: u64, to: u64, amount: f64) {
    |                                ^^^^^^^^^^^
+   |
+help: introduce a newtype (body uses of the param and call sites will need updating)
+   |
+LL + struct Amount(f64);
+LL + 
+LL ~ pub fn bad(from: u64, to: u64, amount: Amount) {
+   |
 
-warning: 3 warnings emitted
+warning: param `retry_count` uses raw primitive `u32` — wrap it in a newtype
+  --> $DIR/raw_primitive_param.rs:11:24
+   |
+LL | pub fn snake_case_name(retry_count: u32) {
+   |                        ^^^^^^^^^^^^^^^^
+   |
+help: introduce a newtype (body uses of the param and call sites will need updating)
+   |
+LL + struct RetryCount(u32);
+LL + 
+LL ~ pub fn snake_case_name(retry_count: RetryCount) {
+   |
+
+warning: param `label` uses raw primitive `str` — wrap it in a newtype
+  --> $DIR/raw_primitive_param.rs:15:18
+   |
+LL | pub fn ref_param(label: &str) {
+   |                  ^^^^^^^^^^^
+
+warning: param `count` uses raw primitive `u32` — wrap it in a newtype
+  --> $DIR/raw_primitive_param.rs:22:26
+   |
+LL |     pub fn method(&self, count: u32) {
+   |                          ^^^^^^^^^^
+
+warning: 6 warnings emitted
 

@@ -24,3 +24,20 @@ fn transfer(from: AccountId, to: AccountId, amount: Amount) {
     // Types prevent misuse
 }
 ```
+
+## Autofix
+
+`cargo oneway lint --fix` inserts a newtype declaration immediately before
+the function and rewrites the param's type. Param name is converted from
+`snake_case` to `PascalCase` for the type identifier. Body uses of the
+param (`from + 1`) and existing call sites both stop compiling and have to
+be updated to wrap / unwrap manually — the autofix lands anyway because
+`cargo oneway lint --fix` passes `--broken-code` to `cargo fix`.
+
+Skipped:
+
+- **Impl methods and trait methods** — inserting before the fn span would
+  put a struct declaration inside the `impl` / `trait` block. Diagnostic
+  still fires; move the type outside the impl by hand.
+- **Reference params** (`&str`, `&u32`) — the newtype shape doesn't transfer
+  cleanly through indirection.

@@ -32,3 +32,18 @@ struct Order {
     user_id: UserId,
 }
 ```
+
+## Autofix
+
+`cargo oneway lint --fix` introduces a newtype for each offending field: the
+field name is converted from `snake_case` to `PascalCase` (`user_id` →
+`UserId`) and the new `struct Newtype(primitive);` is inserted right after
+the parent struct. Visibility is copied from the field so the newtype is
+constructible from wherever the parent struct was. Call sites that
+previously passed raw values (`Order { price: 9.99, … }`) will break and
+must be wrapped manually (`Order { price: Price(9.99), … }`) — `cargo
+oneway lint --fix` runs `cargo fix --broken-code` so the autofix lands
+even though the intermediate code doesn't typecheck.
+
+Fields behind a reference (`&str`, `&u32`) are diagnostic-only — `&str`
+can't be wrapped without changing the field's storage shape.

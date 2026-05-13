@@ -7,6 +7,16 @@ LL | |     }
    | |_____^
    |
    = note: `#[warn(no_nested_functions)]` on by default
+help: hoist the nested function to module level
+   |
+LL ~     
+LL |     let _ = inner();
+LL ~ }
+LL + 
+LL + fn inner() -> i32 {
+LL +         42
+LL +     }
+   |
 
 warning: 1 warning emitted
 

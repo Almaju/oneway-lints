@@ -59,3 +59,28 @@ impl Message {
     fn assistant(content: String) -> Self { ... }
 }
 ```
+
+## Autofix
+
+`cargo oneway lint --fix` renames the constructor to `new` and rewrites
+every `<Type>::<old_name>` call site found in the crate. The autofix
+applies only when:
+
+- The type has **exactly one** forbidden-name constructor (otherwise
+  multiple would all want to become `new` — ambiguous).
+- The type has **no existing `new` method** (otherwise the rename would
+  collide).
+
+Both conditions are detected via a crate-wide AST scan that runs once,
+collecting impl blocks and matching path expressions. Call site detection
+matches on the last two path segments (`Type::method`), so qualified
+paths like `crate::server::Server::create()` are rewritten too.
+
+Rare false-positive risk when two different types in separate modules
+share the same simple name (`Foo`) and only one is being renamed — call
+sites for the other `Foo::name` would also get touched. Re-run `cargo
+check` to confirm.
+
+When neither condition holds, the diagnostic fires without a suggestion;
+pick the rename manually (and choose a descriptive name if `new` already
+means something else for this type).

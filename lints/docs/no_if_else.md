@@ -60,3 +60,26 @@ fn describe(user: &User) -> String {
     }
 }
 ```
+
+## Autofix
+
+`cargo oneway lint --fix` rewrites the entire chain (only the outermost
+warning per chain is now emitted) as a guard-based `match`:
+
+```rust
+match () {
+    _ if n < 0 => { "negative" },
+    _ if n == 0 => { "zero" },
+    _ => { "positive" },
+}
+```
+
+The rewrite preserves semantics but doesn't promote the discriminant —
+`match () { _ if cond => … }` is a uniform mechanical fit. The good
+versions above (matching on `Ordering` or `Role`) are the intended next
+step; treat the autofix as a starting point that gets you out of
+`if/else` syntactically, then tighten manually.
+
+Skipped when any condition in the chain uses `if let` (the pattern can't
+flatten into a guard) or when the chain has no final `else` (match must
+be exhaustive).

@@ -1,11 +1,3 @@
-warning: param `n` uses raw primitive `i32` — wrap it in a newtype
-  --> $DIR/no_if_else.rs:1:17
-   |
-LL | pub fn classify(n: i32) -> &'static str {
-   |                 ^^^^^^
-   |
-   = note: `#[warn(raw_primitive_param)]` on by default
-
 warning: `if`/`else` chain — prefer `match` for exhaustive case analysis
   --> $DIR/no_if_else.rs:2:5
    |
@@ -19,23 +11,47 @@ LL | |     }
    | |_____^
    |
    = note: `#[warn(no_if_else)]` on by default
-
-warning: `if`/`else` chain — prefer `match` for exhaustive case analysis
-  --> $DIR/no_if_else.rs:4:12
+help: rewrite as `match`
    |
-LL |       } else if n == 0 {
-   |  ____________^
-LL | |         "zero"
-LL | |     } else {
-LL | |         "positive"
-LL | |     }
-   | |_____^
+LL ~     match () {
+LL +     _ if n < 0 => {
+LL +         "negative"
+LL +     },
+LL +     _ if n == 0 => {
+LL +         "zero"
+LL +     },
+LL +     _ => {
+LL +         "positive"
+LL +     },
+LL + }
+   |
+
+warning: param `n` uses raw primitive `i32` — wrap it in a newtype
+  --> $DIR/no_if_else.rs:1:17
+   |
+LL | pub fn classify(n: i32) -> &'static str {
+   |                 ^^^^^^
+   |
+   = note: `#[warn(raw_primitive_param)]` on by default
+help: introduce a newtype (body uses of the param and call sites will need updating)
+   |
+LL + struct N(i32);
+LL + 
+LL ~ pub fn classify(n: N) -> &'static str {
+   |
 
 warning: param `x` uses raw primitive `bool` — wrap it in a newtype
   --> $DIR/no_if_else.rs:19:16
    |
 LL | pub fn no_else(x: bool) {
    |                ^^^^^^^
+   |
+help: introduce a newtype (body uses of the param and call sites will need updating)
+   |
+LL + struct X(bool);
+LL + 
+LL ~ pub fn no_else(x: X) {
+   |
 
-warning: 4 warnings emitted
+warning: 3 warnings emitted
 

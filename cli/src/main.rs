@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
-use std::process::{Command, ExitCode};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode, Stdio};
+
+use serde_json::Value;
 
 const CLIPPY_TOML: &str = include_str!("../templates/clippy.toml");
 const RUSTFMT_TOML: &str = include_str!("../templates/rustfmt.toml");
@@ -176,15 +179,9 @@ fn run_clippy(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
     run(command)
 }
 
-fn run_dylint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
+fn build_dylint_command(lint_opts: &LintOpts<'_>) -> Command {
     let mut command = Command::new("cargo");
     command.arg("dylint");
-    match lint_opts.fix_mode {
-        FixMode::Off => {},
-        FixMode::On => {
-            command.arg("--fix");
-        },
-    }
     // WHY: either `--path` or `--git --pattern` picks the library. We deliberately
     // do not pass `--lib` because it conflicts with dylint's `--all` mode that
     // gets engaged automatically when `--pattern` is given.
@@ -206,12 +203,6 @@ fn run_dylint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
                 .arg(DYLINT_PATTERN);
         },
     }
-    match lint_opts.fix_mode {
-        FixMode::Off => {},
-        FixMode::On => {
-            command.arg("--").arg("--allow-dirty").arg("--allow-staged");
-        },
-    }
     // WHY: per-lint allow-overrides go through RUSTFLAGS — dylint forwards
     // post-`--` args to cargo check, which doesn't pass them to rustc as
     // lint flags. RUSTFLAGS hits rustc directly.
@@ -230,7 +221,362 @@ fn run_dylint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
     if !parts.is_empty() {
         command.env("RUSTFLAGS", parts.join(" "));
     }
-    run(command)
+    command
+}
+
+fn run_dylint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
+    let mut command = build_dylint_command(lint_opts);
+    match lint_opts.fix_mode {
+        FixMode::Off => {},
+        FixMode::On => {
+            command.arg("--fix");
+            // WHY: --broken-code is required so cargo fix doesn't revert
+            // suggestions whose intermediate output doesn't typecheck. Many
+            // of our autofixes are deliberately starting points (newtype
+            // wrappers leave call sites broken, etc.) — without this flag
+            // those edits get rolled back and the user sees no change.
+            command
+                .arg("--")
+                .arg("--allow-dirty")
+                .arg("--allow-staged")
+                .arg("--broken-code");
+        },
+    }
+    let exit = run(command)?;
+    match lint_opts.fix_mode {
+        FixMode::Off => Ok(exit),
+        // WHY: run an extraction pass after the rustc-suggestion-based fix.
+        // `one_public_type_per_file` has no in-source suggestion (it needs
+        // to create new files), so we collect those diagnostics from a
+        // second dylint invocation with `--message-format=json` and apply
+        // the splits ourselves. Extract failures don't fail the lint
+        // command — the diagnostic still got reported.
+        FixMode::On => {
+            let _ = run_extract_pass(lint_opts);
+            Ok(exit)
+        },
+    }
+}
+
+/// A `one_public_type_per_file` diagnostic distilled to what we need for
+/// extraction: source file path and the first line of the type's text (which
+/// is enough to locate the type's declaration in the post-fix source).
+struct ExtractTarget {
+    file: PathBuf,
+    first_line: String,
+}
+
+fn run_extract_pass(lint_opts: &LintOpts<'_>) -> io::Result<()> {
+    let targets = collect_extract_targets(lint_opts)?;
+    // WHY: group by file and apply extractions back-to-front so earlier byte
+    // offsets in the same file stay valid after each splice.
+    let mut by_file: HashMap<PathBuf, Vec<ExtractTarget>> = HashMap::new();
+    targets.into_iter().for_each(|t| {
+        by_file.entry(t.file.clone()).or_default().push(t);
+    });
+    by_file.into_iter().for_each(|(file, targets)| {
+        if let Err(error) = apply_extractions(&file, targets) {
+            eprintln!("cargo-oneway: extract pass on {}: {error}", file.display());
+        }
+    });
+    Ok(())
+}
+
+fn collect_extract_targets(lint_opts: &LintOpts<'_>) -> io::Result<Vec<ExtractTarget>> {
+    let mut command = build_dylint_command(lint_opts);
+    // WHY: `cargo dylint` forwards post-`--` args to the inner cargo
+    // invocation, which is where `--message-format` is parsed.
+    command.arg("--").arg("--message-format=json");
+    announce(&command);
+    let output = command.stdout(Stdio::piped()).stderr(Stdio::inherit()).output()?;
+    let mut targets = Vec::new();
+    output.stdout.split(|&b| b == b'\n').for_each(|line| {
+        if line.is_empty() {
+            return;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(line) else {
+            return;
+        };
+        if value.get("reason").and_then(Value::as_str) != Some("compiler-message") {
+            return;
+        }
+        let Some(message) = value.get("message") else { return };
+        let code = message
+            .get("code")
+            .and_then(|c| c.get("code"))
+            .and_then(Value::as_str);
+        if code != Some("one_public_type_per_file") {
+            return;
+        }
+        let Some(spans) = message.get("spans").and_then(Value::as_array) else {
+            return;
+        };
+        let Some(primary) = spans
+            .iter()
+            .find(|s| s.get("is_primary").and_then(Value::as_bool) == Some(true))
+        else {
+            return;
+        };
+        let file = primary.get("file_name").and_then(Value::as_str);
+        let text = primary
+            .get("text")
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(|t| t.get("text"))
+            .and_then(Value::as_str);
+        if let (Some(file), Some(text)) = (file, text) {
+            targets.push(ExtractTarget {
+                file: PathBuf::from(file),
+                first_line: text.to_string(),
+            });
+        }
+    });
+    Ok(targets)
+}
+
+/// Apply extractions to a single source file. Each target is located in the
+/// current (post-fix) source by searching for its first line; we then expand
+/// backward over leading `#[...]` attributes and forward over the matching
+/// brace pair to get the full item, write it to its own file, splice the
+/// parent, and add `pub mod`/`pub use` (or `pub(crate)`) at the top.
+fn apply_extractions(file: &Path, targets: Vec<ExtractTarget>) -> io::Result<()> {
+    let mut source = fs::read_to_string(file)?;
+    let mut mod_lines: Vec<String> = Vec::new();
+    let mut use_lines: Vec<String> = Vec::new();
+    targets.iter().try_for_each(|target| -> io::Result<()> {
+        let Some(decl_start) = source.find(&target.first_line) else {
+            eprintln!(
+                "cargo-oneway: extract: couldn't locate `{}` in {}",
+                target.first_line.trim(),
+                file.display()
+            );
+            return Ok(());
+        };
+        let (vis, type_name) = match parse_type_decl(&target.first_line) {
+            None => {
+                eprintln!(
+                    "cargo-oneway: extract: couldn't parse type name from `{}`",
+                    target.first_line.trim()
+                );
+                return Ok(());
+            },
+            Some(parsed) => parsed,
+        };
+        let extract_lo = extend_backward(source.as_bytes(), decl_start);
+        let Some(brace_open) = source[decl_start..].find('{') else {
+            return Ok(());
+        };
+        let Some(brace_close_rel) = find_matching_brace(&source[decl_start + brace_open..])
+        else {
+            return Ok(());
+        };
+        let extract_hi = decl_start + brace_open + brace_close_rel + 1;
+        let mod_name = pascal_to_snake(&type_name);
+        let dest = destination_path(file, &mod_name);
+        // WHY: don't clobber an unrelated file the user already has. If the
+        // destination exists, leave it and skip this extraction; the lint
+        // will still fire next run and the human can resolve the conflict.
+        if dest.exists() {
+            eprintln!(
+                "cargo-oneway: extract: {} already exists, skipping {type_name}",
+                dest.display()
+            );
+            return Ok(());
+        }
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let extracted = source[extract_lo..extract_hi].trim_start().to_string();
+        let extracted = format!("{}\n", extracted.trim_end());
+        fs::write(&dest, &extracted)?;
+        eprintln!(
+            "cargo-oneway: extracted {type_name} → {}",
+            dest.display()
+        );
+        let prelude_vis = match vis.is_empty() {
+            true => "pub".to_string(),
+            false => vis.trim_end().to_string(),
+        };
+        // WHY: emit mods and uses to separate buckets so the final prelude
+        // reads `mod a; mod b; \n use a::A; use b::B;`. Interleaving them
+        // would violate our own `mod_after_use` rule.
+        mod_lines.push(format!("{prelude_vis} mod {mod_name};\n"));
+        use_lines.push(format!("{prelude_vis} use {mod_name}::{type_name};\n"));
+        // WHY: splice out the extracted bytes along with the trailing blank
+        // line that typically separated this item from the next so the
+        // parent file doesn't accumulate empty lines on each run.
+        let mut splice_hi = extract_hi;
+        while source.as_bytes().get(splice_hi) == Some(&b'\n') {
+            splice_hi += 1;
+            if source.as_bytes().get(splice_hi) != Some(&b'\n') {
+                break;
+            }
+        }
+        source.replace_range(extract_lo..splice_hi, "");
+        Ok(())
+    })?;
+    if mod_lines.is_empty() {
+        return Ok(());
+    }
+    let prelude = format!("{}\n{}\n", mod_lines.join(""), use_lines.join(""));
+    let insert_pos = prelude_insert_position(&source);
+    source.insert_str(insert_pos, &prelude);
+    fs::write(file, source)?;
+    Ok(())
+}
+
+/// Find the byte offset where the extraction prelude should be inserted: the
+/// start of the first non-attribute, non-comment, non-blank, non-`mod` line.
+/// This keeps existing `mod` declarations before the new ones and the new
+/// `use` statements before any existing `use` block — preserving the
+/// `mod_after_use` invariant.
+fn prelude_insert_position(source: &str) -> usize {
+    let mut byte = 0;
+    let mut lines = source.lines();
+    loop {
+        let Some(line) = lines.next() else { return source.len() };
+        let trimmed = line.trim_start();
+        let advance = || byte + line.len() + 1;
+        if trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with("#[")
+            || trimmed.starts_with("#![")
+            || is_mod_decl(trimmed)
+        {
+            byte = advance();
+            continue;
+        }
+        return byte;
+    }
+}
+
+fn is_mod_decl(line: &str) -> bool {
+    let rest = match line.strip_prefix("pub") {
+        None => line,
+        Some(after) => match after.chars().next() {
+            Some('(') => match after.find(')') {
+                None => return false,
+                Some(close) => after[close + 1..].trim_start(),
+            },
+            Some(c) if c.is_whitespace() => after.trim_start(),
+            _ => line,
+        },
+    };
+    rest.starts_with("mod ") && rest.ends_with(';')
+}
+
+/// Walk backward over whitespace + `#[...]` blocks starting at `pos`. Returns
+/// the byte offset of the first attribute (or `pos` if none).
+fn extend_backward(bytes: &[u8], pos: usize) -> usize {
+    let mut probe = pos;
+    loop {
+        let mut q = probe;
+        while q > 0 && bytes[q - 1].is_ascii_whitespace() {
+            q -= 1;
+        }
+        if q == 0 || bytes[q - 1] != b']' {
+            return probe;
+        }
+        // Scan backward for matching `[`, then check for `#` in front.
+        let mut depth = 1i32;
+        let mut r = q - 1;
+        while r > 0 && depth > 0 {
+            r -= 1;
+            match bytes[r] {
+                b']' => depth += 1,
+                b'[' => depth -= 1,
+                _ => {},
+            }
+        }
+        if depth != 0 || r == 0 || bytes[r - 1] != b'#' {
+            return probe;
+        }
+        probe = r - 1;
+    }
+}
+
+/// Find the byte offset (within `src`) of the `}` that closes the `{` at
+/// `src[0]`. Naive — doesn't account for braces in strings or comments.
+fn find_matching_brace(src: &str) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            },
+            _ => {},
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Parse `(pub|pub(crate)|pub(super)|...)? (struct|enum) <Name>` from the
+/// first line of an item. Returns `(visibility_with_trailing_space, name)`.
+fn parse_type_decl(line: &str) -> Option<(String, String)> {
+    let s = line.trim_start();
+    let (vis, rest) = match s.strip_prefix("pub") {
+        None => (String::new(), s),
+        Some(after_pub) => match after_pub.chars().next() {
+            Some('(') => {
+                let close = after_pub.find(')')?;
+                let vis = format!("pub{} ", &after_pub[..close + 1]);
+                (vis, after_pub[close + 1..].trim_start())
+            },
+            Some(c) if c.is_whitespace() => ("pub ".to_string(), after_pub.trim_start()),
+            _ => return None,
+        },
+    };
+    let rest = rest
+        .strip_prefix("struct")
+        .or_else(|| rest.strip_prefix("enum"))?;
+    let rest = rest.trim_start();
+    let end = rest
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(rest.len());
+    match end {
+        0 => None,
+        _ => Some((vis, rest[..end].to_string())),
+    }
+}
+
+fn pascal_to_snake(s: &str) -> String {
+    s.chars()
+        .enumerate()
+        .fold(String::with_capacity(s.len() + 4), |mut out, (i, c)| {
+            match c.is_ascii_uppercase() {
+                false => out.push(c),
+                true => {
+                    if i > 0 {
+                        out.push('_');
+                    }
+                    out.extend(c.to_lowercase());
+                },
+            }
+            out
+        })
+}
+
+/// Compute the destination path for an extracted module given the parent
+/// file. For `lib.rs` / `main.rs` siblings live in the same directory; for
+/// any other parent the extracted file goes inside `<parent_stem>/`.
+fn destination_path(parent: &Path, mod_name: &str) -> PathBuf {
+    let stem = parent
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let dir = parent.parent().unwrap_or_else(|| Path::new("."));
+    match stem {
+        "lib" | "main" => dir.join(format!("{mod_name}.rs")),
+        _ => dir.join(stem).join(format!("{mod_name}.rs")),
+    }
 }
 
 fn run_lint(lint_opts: &LintOpts<'_>) -> io::Result<i32> {
@@ -280,6 +626,9 @@ FLAGS:
     --fix   Apply autofixes: rewrites formatting in place (no `--check`),
             and runs clippy + oneway-lints with `--fix --allow-dirty
             --allow-staged` so they can patch a dirty working tree.
+            After the rustc-suggestion-based fixes, an extraction pass
+            handles `one_public_type_per_file` by moving extra primary
+            public types to their own files and rewiring `mod`/`use`.
 
 CONFIG:
     oneway.toml at the project root can disable specific rules:

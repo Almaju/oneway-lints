@@ -31,3 +31,15 @@ fn process(items: &[Item]) -> Vec<Result> {
     items.iter().map(transform).collect()
 }
 ```
+
+## Autofix
+
+`cargo oneway lint --fix` lifts the nested function out, placing it
+immediately after the outer fn (Rust's nested `fn` items can't capture
+outer locals or generics, so hoisting is semantically a no-op). The only
+failure mode is a name collision with an existing module-level item —
+re-run `cargo check` and rename if so.
+
+Skipped for nested fns inside `impl` methods or trait methods (would
+hoist into the `impl` block, which isn't module level). The diagnostic
+still fires; move them by hand.

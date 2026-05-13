@@ -19,36 +19,89 @@ LL |     name: String,
    |           ^^^^^^
    |
    = note: `#[warn(raw_primitive_field)]` on by default
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     name: Name,
+LL |     email: String,
+LL |     age: u32,
+LL ~ }
+LL + 
+LL + struct Name(String);
+   |
 
 warning: field `email` uses raw primitive `String` — wrap it in a newtype
   --> $DIR/unsorted_struct_fields.rs:3:12
    |
 LL |     email: String,
    |            ^^^^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     email: Email,
+LL |     age: u32,
+LL ~ }
+LL + 
+LL + struct Email(String);
+   |
 
 warning: field `age` uses raw primitive `u32` — wrap it in a newtype
   --> $DIR/unsorted_struct_fields.rs:4:10
    |
 LL |     age: u32,
    |          ^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     age: Age,
+LL ~ }
+LL + 
+LL + struct Age(u32);
+   |
 
 warning: field `age` uses raw primitive `u32` — wrap it in a newtype
   --> $DIR/unsorted_struct_fields.rs:8:10
    |
 LL |     age: u32,
    |          ^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     age: Age,
+LL |     email: String,
+LL |     name: String,
+LL ~ }
+LL + 
+LL + struct Age(u32);
+   |
 
 warning: field `email` uses raw primitive `String` — wrap it in a newtype
   --> $DIR/unsorted_struct_fields.rs:9:12
    |
 LL |     email: String,
    |            ^^^^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     email: Email,
+LL |     name: String,
+LL ~ }
+LL + 
+LL + struct Email(String);
+   |
 
 warning: field `name` uses raw primitive `String` — wrap it in a newtype
   --> $DIR/unsorted_struct_fields.rs:10:11
    |
 LL |     name: String,
    |           ^^^^^^
+   |
+help: introduce a newtype (call sites will need to wrap their values)
+   |
+LL ~     name: Name,
+LL ~ }
+LL + 
+LL + struct Name(String);
+   |
 
 error: aborting due to 1 previous error; 6 warnings emitted
 
