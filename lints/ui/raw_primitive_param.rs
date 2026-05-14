@@ -39,4 +39,14 @@ impl std::str::FromStr for Role {
     }
 }
 
+pub struct RedirectUrl(String);
+
+// WHY: same shape — `From<&str>` is a foreign trait whose `from(s: &str)`
+// signature the user can't change. The lint must skip trait impl methods.
+impl From<&str> for RedirectUrl {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
 fn main() {}
