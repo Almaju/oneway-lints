@@ -155,6 +155,11 @@ impl EarlyLintPass for SubjectFirstParam {
         let arity_issue = match (inputs.len(), has_self) {
             (0, _) => None,
             (1 | 2, true) => None,
+            // WHY: constructor-style associated fns can't take `self` as the
+            // first param — the instance doesn't exist yet. Allow any arity
+            // when the return type mentions `Self` (covers `-> Self`,
+            // `-> Result<Self, _>`, `-> Option<Self>`, etc.).
+            (_, false) if fn_box.sig.decl.returns_self_type(early_context) => None,
             (_, false) => Some(
                 "free function takes parameters — make it a method on a type so the subject is `self`",
             ),
@@ -221,6 +226,11 @@ const FORBIDDEN_NAMES: &[&str] = &["build", "construct", "create", "init", "make
 trait FnDeclExt {
     fn has_self_receiver(&self) -> bool;
     fn returns_self(&self, early_context: &EarlyContext<'_>) -> bool;
+    /// True when the return type mentions `Self` anywhere — `Self`,
+    /// `Result<Self, _>`, `Option<Self>`, `Arc<Self>`, …. Used to recognise
+    /// constructor-style associated functions, which can't take `self` as
+    /// a parameter because the instance doesn't exist yet.
+    fn returns_self_type(&self, early_context: &EarlyContext<'_>) -> bool;
 }
 
 impl FnDeclExt for ast::FnDecl {
@@ -236,6 +246,18 @@ impl FnDeclExt for ast::FnDecl {
             return false;
         };
         snippet.trim() == "Self"
+    }
+
+    fn returns_self_type(&self, early_context: &EarlyContext<'_>) -> bool {
+        let ast::FnRetTy::Ty(ref ty) = self.output else {
+            return false;
+        };
+        let Ok(snippet) = early_context.sess().source_map().span_to_snippet(ty.span) else {
+            return false;
+        };
+        snippet
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|tok| tok == "Self")
     }
 }
 

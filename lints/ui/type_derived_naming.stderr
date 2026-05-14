@@ -165,22 +165,6 @@ LL | |     let _ = thing;
 LL | | }
    | |_^
 
-error: free function takes parameters — make it a method on a type so the subject is `self`
-  --> $DIR/type_derived_naming.rs:61:5
-   |
-LL | /     pub fn from_admin(source: AdminSource) -> Self {
-LL | |         Self { src: source }
-LL | |     }
-   | |_____^
-
-error: free function takes parameters — make it a method on a type so the subject is `self`
-  --> $DIR/type_derived_naming.rs:71:5
-   |
-LL | /     pub fn from_admin(source: AdminSource) -> Self {
-LL | |         Self { source }
-LL | |     }
-   | |_____^
-
 warning: second primary public type in this file — extract into its own file
   --> $DIR/type_derived_naming.rs:66:1
    |
@@ -191,5 +175,5 @@ LL | | }
    |
    = note: `#[warn(one_public_type_per_file)]` on by default
 
-error: aborting due to 20 previous errors; 1 warning emitted
+error: aborting due to 18 previous errors; 1 warning emitted
 

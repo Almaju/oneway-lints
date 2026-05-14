@@ -1,8 +1,20 @@
 pub struct Server;
 
 impl Server {
+    /// WHY: constructor-style associated function with multiple inputs — the
+    /// instance doesn't exist yet so `self` can't be first. Should not be
+    /// flagged.
+    pub fn connect(name: Name, config: Config) -> Result<Self, ServerError> {
+        let _ = (name, config);
+        Ok(Self)
+    }
     pub fn new() -> Self {
         Self
+    }
+    /// WHY: fallible constructor returning `Option<Self>` — same carve-out.
+    pub fn parse(text: Text) -> Option<Self> {
+        let _ = text;
+        Some(Self)
     }
     pub fn handle(&self, request: Request) {
         let _ = request;
@@ -13,8 +25,12 @@ impl Server {
     pub fn ping(&self) {}
 }
 
+pub struct Config;
+pub struct Name;
 pub struct Request;
 pub struct Response;
+pub struct ServerError;
+pub struct Text;
 
 pub fn ok_zero() {}
 

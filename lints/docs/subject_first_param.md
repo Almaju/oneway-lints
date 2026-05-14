@@ -131,6 +131,11 @@ The lint skips:
   fixed by the C ABI.
 - **Trait `impl` method bodies** — signatures are constrained by the
   trait declaration. Fix the trait, not every impl.
+- **Constructor-style associated functions** — any fn whose return type
+  mentions `Self` (e.g. `fn new() -> Self`, `fn connect(name, config)
+  -> Result<Self, _>`, `fn parse(s) -> Option<Self>`). The instance
+  doesn't exist yet so `self` can't be first; the carve-out is
+  required for the rule to coexist with idiomatic Rust constructors.
 
 If you genuinely need a free function with parameters (rare — usually a
 sign the design is missing a type), reach for `#[allow(subject_first_param)]`

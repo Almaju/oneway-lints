@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fro
 ## Unreleased
 
 ### Fixed
+- **`subject_first_param` no longer fires on constructor-style associated functions.** The previous strict rule flagged `fn connect(name, config) -> Result<Self, _>` and `fn parse(s) -> Option<Self>` as "free function takes parameters". The instance doesn't exist yet so `self` can't be the first param; the carve-out is required for the rule to coexist with idiomatic Rust constructors. New `FnDeclExt::returns_self_type` checks whether the return type mentions `Self` anywhere (covers `Self`, `Result<Self, _>`, `Option<Self>`, `Arc<Self>`, …); when it does, the no-self-with-params case is allowed. UI test `subject_first_param.rs` extended with `connect` and `parse` constructors as positive cases.
 - **`type_derived_naming` no longer fires on `thiserror`-generated bindings.** The proc macro's `#[derive(Error)]` codegen stamps the synthesised `source` ident with the user's `#[from]` span (root `SyntaxContext`), so the previous `param.span.from_expansion()` check failed to recognise it as macro-generated. The lint now additionally checks whether the source text at `ident.span` actually spells out `ident.name`; a mismatch indicates a synthesised binding and the lint skips it. Covered by a new `examples/thiserror_naming.rs` UI test that exercises the real thiserror codegen via `dylint_testing::ui_test_example`.
 
 ### Added

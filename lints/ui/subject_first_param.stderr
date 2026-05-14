@@ -1,5 +1,5 @@
 error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
-  --> $DIR/subject_first_param.rs:7:5
+  --> $DIR/subject_first_param.rs:19:5
    |
 LL | /     pub fn handle(&self, request: Request) {
 LL | |         let _ = request;
@@ -9,7 +9,7 @@ LL | |     }
    = note: `#[deny(subject_first_param)]` on by default
 
 error: method takes more than one non-self param — wrap the inputs in a struct or newtype
-  --> $DIR/subject_first_param.rs:10:5
+  --> $DIR/subject_first_param.rs:22:5
    |
 LL | /     pub fn over_limit(&self, request: Request, response: Response) {
 LL | |         let _ = (request, response);
@@ -17,13 +17,13 @@ LL | |     }
    | |_____^
 
 error: method declares `self` but never references it — move to an extension trait on the actual subject (the type used in the body), or make it a free fn
-  --> $DIR/subject_first_param.rs:13:5
+  --> $DIR/subject_first_param.rs:25:5
    |
 LL |     pub fn ping(&self) {}
    |     ^^^^^^^^^^^^^^^^^^^^^
 
 error: free function takes parameters — make it a method on a type so the subject is `self`
-  --> $DIR/subject_first_param.rs:21:1
+  --> $DIR/subject_first_param.rs:37:1
    |
 LL | / pub fn bad_one_param(request: Request) {
 LL | |     let _ = request;
@@ -31,7 +31,7 @@ LL | | }
    | |_^
 
 error: method takes more than one non-self param — wrap the inputs in a struct or newtype
-  --> $DIR/subject_first_param.rs:26:5
+  --> $DIR/subject_first_param.rs:42:5
    |
 LL |     fn trait_method_too_wide(&self, request: Request, response: Response);
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
