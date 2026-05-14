@@ -49,4 +49,13 @@ impl From<&str> for RedirectUrl {
     }
 }
 
+pub struct IssuerUrl(String);
+
+// WHY: also test the `From<String>` variant — same fix should cover it.
+impl From<String> for IssuerUrl {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
 fn main() {}
