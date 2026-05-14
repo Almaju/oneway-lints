@@ -102,3 +102,25 @@ fn deploy<Service: Migrator + Connector + Orchestrator>(service: Service) {
     service.orchestrate()
 }
 ```
+
+## Macro-generated bindings
+
+The lint **skips synthesised bindings**: idents whose span is in macro
+expansion, *and* idents whose span points back at user source but whose
+name doesn't actually appear at that location (the pattern proc macros
+like `thiserror` use — `quote_spanned!` stamps the generated `source`
+ident with the span of `#[from]` so error messages link back to the
+user's code).
+
+In practice this means you can write the idiomatic thiserror pattern:
+
+```rust
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("database error: {0}")]
+    Database(#[from] DbError),
+}
+```
+
+…without the lint flagging the generated `fn from(source: DbError)`
+constructor.

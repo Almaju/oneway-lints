@@ -186,6 +186,35 @@ impl GenericsExt for ast::Generics {
     }
 }
 
+trait IdentExt {
+    /// True when this ident was synthesised by a macro rather than
+    /// hand-written. Catches two cases:
+    ///
+    /// 1. `ident.span.from_expansion()` — declarative macros (`macro_rules!`)
+    ///    and proc macros that use `Span::call_site()` for the generated
+    ///    ident both fall here.
+    /// 2. The source text at `ident.span` doesn't spell out the ident's
+    ///    name — a proc macro stamped the generated binding with a
+    ///    user-source span (e.g. `quote_spanned!` in thiserror's `#[from]`
+    ///    codegen). The span has root `SyntaxContext` so `from_expansion`
+    ///    returns false, but the source code at that location is something
+    ///    else (`#[from]`, the type, etc.).
+    fn is_synthetic(&self, early_context: &EarlyContext<'_>) -> bool;
+}
+
+impl IdentExt for rustc_span::Ident {
+    fn is_synthetic(&self, early_context: &EarlyContext<'_>) -> bool {
+        if self.span.from_expansion() {
+            return true;
+        }
+        let source_map = early_context.sess().source_map();
+        match source_map.span_to_snippet(self.span) {
+            Err(_) => false,
+            Ok(snippet) => snippet.trim() != self.name.as_str(),
+        }
+    }
+}
+
 struct BindingName<'a>(&'a str);
 
 struct Binding<'a> {
@@ -469,16 +498,19 @@ impl<'ast> Visitor<'ast> for NamingVisitor<'_> {
         if !local.span.from_expansion() {
             if let Some(ty) = &local.ty {
                 if let ast::PatKind::Ident(_, ident, _) = &local.pat.kind {
-                    // WHY: let-binding scope is the rest of the enclosing
-                    // block (until shadowed), which we don't track precisely.
-                    // Use fn-wide ref scope would over-rename across blocks;
-                    // safer to emit diagnostic without autofix.
-                    self.check_binding(Binding {
-                        binding_name: BindingName(ident.name.as_str()),
-                        rename_refs: None,
-                        span: local.pat.span,
-                        ty,
-                    });
+                    if !ident.is_synthetic(self.early_context) {
+                        // WHY: let-binding scope is the rest of the enclosing
+                        // block (until shadowed), which we don't track
+                        // precisely. Using fn-wide ref scope would over-rename
+                        // across blocks; safer to emit diagnostic without
+                        // autofix.
+                        self.check_binding(Binding {
+                            binding_name: BindingName(ident.name.as_str()),
+                            rename_refs: None,
+                            span: local.pat.span,
+                            ty,
+                        });
+                    }
                 }
             }
         }
@@ -488,6 +520,10 @@ impl<'ast> Visitor<'ast> for NamingVisitor<'_> {
     fn visit_param(&mut self, param: &'ast ast::Param) {
         if !param.span.from_expansion() && !param.is_self() {
             if let ast::PatKind::Ident(_, ident, _) = &param.pat.kind {
+                if ident.is_synthetic(self.early_context) {
+                    visit::walk_param(self, param);
+                    return;
+                }
                 let name = ident.name.as_str().to_string();
                 // WHY: skip autofix if the name is shadowed in the body
                 // by an inner `let`, `if let`, or match arm — those bring

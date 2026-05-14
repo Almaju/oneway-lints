@@ -839,6 +839,7 @@ version = "0.1.0"
 dependencies = [
  "dylint_linting",
  "dylint_testing",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -16,6 +16,14 @@ dylint_linting = "3.3"
 
 [dev-dependencies]
 dylint_testing = "3.3"
+thiserror = "2"
+
+# WHY: `examples/` live in the `dev-dependencies` graph and we want to
+# test the lints on a real `thiserror` codegen pattern that mirrors the
+# `#[from]` issue users hit in the wild.
+[[example]]
+name = "thiserror_naming"
+path = "examples/thiserror_naming.rs"
 
 [package.metadata.rust-analyzer]
 rustc_private = true

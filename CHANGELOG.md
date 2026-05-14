@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fro
 
 ## Unreleased
 
+### Fixed
+- **`type_derived_naming` no longer fires on `thiserror`-generated bindings.** The proc macro's `#[derive(Error)]` codegen stamps the synthesised `source` ident with the user's `#[from]` span (root `SyntaxContext`), so the previous `param.span.from_expansion()` check failed to recognise it as macro-generated. The lint now additionally checks whether the source text at `ident.span` actually spells out `ident.name`; a mismatch indicates a synthesised binding and the lint skips it. Covered by a new `examples/thiserror_naming.rs` UI test that exercises the real thiserror codegen via `dylint_testing::ui_test_example`.
+
 ### Added
 - **Autofix for `raw_primitive_field`** — `cargo oneway lint --fix` introduces a newtype per offending field. Field name is converted snake_case → PascalCase for the type identifier, visibility is copied from the field, and the new `struct Name(primitive);` is appended after the parent struct (so any leading `#[derive(...)]` stays attached to the parent rather than the newtype). Call sites that passed raw values must wrap them manually afterward — the autofix relies on `cargo fix --broken-code` (passed by the CLI) so the rewrite lands even though the intermediate code doesn't typecheck. Fields behind a reference (`&str`, `&u32`) remain diagnostic-only — the newtype shape doesn't transfer cleanly through indirection.
 - **Autofix for `raw_primitive_param`** — same shape as the field autofix, applied to free functions: newtype declaration is inserted immediately before the fn span, the param's primitive is replaced. Body uses of the param and call sites both break and must be rewrapped/unwrapped after the fix. Skipped for impl methods and trait methods (would insert a struct inside the impl/trait block) and for reference params.
