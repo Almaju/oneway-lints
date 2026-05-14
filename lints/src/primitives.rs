@@ -162,7 +162,11 @@ declare_lint! {
     "function parameters should wrap raw primitives in a newtype"
 }
 
-pub struct RawPrimitiveParam;
+#[allow(raw_primitive_field)]
+#[derive(Default)]
+pub struct RawPrimitiveParam {
+    in_trait_impl_depth: u32,
+}
 impl_lint_pass!(RawPrimitiveParam => [RAW_PRIMITIVE_PARAM]);
 
 impl EarlyLintPass for RawPrimitiveParam {
@@ -177,6 +181,13 @@ impl EarlyLintPass for RawPrimitiveParam {
             return;
         };
         if fn_box.body.is_none() {
+            return;
+        }
+        // WHY: trait impl signatures are dictated by the trait — the user
+        // can't change `FromStr::from_str(s: &str)` to take a newtype.
+        // Skip the lint entirely inside trait impl blocks (the trait
+        // declaration site is where it should fire, if anywhere).
+        if self.in_trait_impl_depth > 0 {
             return;
         }
         // WHY: autofix only at free-fn level. Inside `impl`, inserting before
@@ -224,5 +235,21 @@ impl EarlyLintPass for RawPrimitiveParam {
                     }
                 });
             });
+    }
+
+    fn check_item(&mut self, _early_context: &EarlyContext<'_>, item: &ast::Item) {
+        if let ast::ItemKind::Impl(impl_block) = &item.kind {
+            if impl_block.of_trait.is_some() {
+                self.in_trait_impl_depth += 1;
+            }
+        }
+    }
+
+    fn check_item_post(&mut self, _early_context: &EarlyContext<'_>, item: &ast::Item) {
+        if let ast::ItemKind::Impl(impl_block) = &item.kind {
+            if impl_block.of_trait.is_some() {
+                self.in_trait_impl_depth = self.in_trait_impl_depth.saturating_sub(1);
+            }
+        }
     }
 }

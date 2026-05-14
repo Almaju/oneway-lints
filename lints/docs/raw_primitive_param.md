@@ -36,8 +36,14 @@ be updated to wrap / unwrap manually — the autofix lands anyway because
 
 Skipped:
 
-- **Impl methods and trait methods** — inserting before the fn span would
-  put a struct declaration inside the `impl` / `trait` block. Diagnostic
-  still fires; move the type outside the impl by hand.
-- **Reference params** (`&str`, `&u32`) — the newtype shape doesn't transfer
-  cleanly through indirection.
+- **Trait impl methods** — signatures are dictated by the trait (you can't
+  rewrite `FromStr::from_str(s: &str)` to take a newtype). The lint skips
+  trait impl method bodies entirely; if the trait belongs to you and the
+  parameter shape is wrong, fix it at the trait declaration.
+- **Reference params** (`&str`, `&u32`) — diagnostic-only, no autofix.
+  The newtype shape doesn't transfer cleanly through indirection.
+
+Autofix is also withheld for inherent impl methods and trait methods —
+inserting the newtype declaration before the fn span would land it inside
+the `impl` / `trait` block, which isn't valid Rust. The diagnostic still
+fires; move the type outside the impl by hand.

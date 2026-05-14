@@ -69,7 +69,7 @@ pub fn register_lints(_sess: &rustc_session::Session, lint_store: &mut rustc_lin
         primitives::RAW_PRIMITIVE_PARAM,
     ]);
     lint_store.register_early_pass(|| Box::new(primitives::RawPrimitiveField));
-    lint_store.register_early_pass(|| Box::new(primitives::RawPrimitiveParam));
+    lint_store.register_early_pass(|| Box::new(primitives::RawPrimitiveParam::default()));
 
     lint_store.register_lints(&[organization::ONE_PUBLIC_TYPE_PER_FILE]);
     lint_store.register_early_pass(|| Box::new(organization::OnePublicTypePerFile::default()));
